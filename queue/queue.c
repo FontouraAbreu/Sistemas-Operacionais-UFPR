@@ -106,7 +106,9 @@ int queue_remove (queue_t **queue, queue_t *elem) {
             elem->next->prev = elem->prev;
             // se o elemento a ser removido é o primeiro da fila
             if (*queue == elem) {
+                queue_t *aux = elem->prev;
                 *queue = elem->next;
+                (*queue)->prev = aux;
             }
         }
         // reseta os ponteiros do elemento removido
