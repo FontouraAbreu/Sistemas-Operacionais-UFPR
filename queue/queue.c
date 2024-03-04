@@ -5,9 +5,13 @@
 int queue_size (queue_t *queue) {
     queue_t *current_node = queue;
     int count = 0;
+
+    // se a fila não existir, então o tamanho é 0
     if (queue == NULL) {
         return 0;
     }
+
+    // se a fila existir, então o tamanho é a quantidade de elementos na fila
     do {
         count++;
         current_node = current_node->next;
