@@ -22,10 +22,20 @@ int queue_size (queue_t *queue) {
 
 void queue_print (char *name, queue_t *queue, void print_elem (void*) ) {
     queue_t *current_node = queue;
+    if (queue == NULL) {
+        printf("%s: []\n", name);
+        return;
+    }
 
+    printf("%s: [", name);
     do {
         print_elem((void*) current_node);
+        if (current_node->next != queue) {
+            printf(" ");
+        }
+        current_node = current_node->next;
     } while (current_node != queue);
+    printf("]\n");
 
     return;
 }
