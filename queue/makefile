@@ -1,3 +1,4 @@
+# GRR20206873 Vinicius Fontoura de Abreu
 CFLAGS = -Wall -g -O1 -std=c99
 CC = gcc
 # regras de ligação

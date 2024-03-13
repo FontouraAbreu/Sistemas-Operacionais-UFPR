@@ -1,3 +1,4 @@
+// GRR20206873 Vinicius Fontoura de Abreu
 #include <stdio.h>
 #include <stdlib.h>
 #include "queue.h"
@@ -128,7 +129,6 @@ int queue_remove (queue_t **queue, queue_t *elem) {
             (*queue)->prev = aux;
         }
     }
-    
     // reseta os ponteiros do elemento removido
     elem->next = NULL;
     elem->prev = NULL;
