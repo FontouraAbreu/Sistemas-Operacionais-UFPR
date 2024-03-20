@@ -1,3 +1,4 @@
+// GRR20206873 Vinicius Fontoura de Abreu
 #include <stdio.h>
 #include <stdlib.h>
 #include "queue.h"
@@ -110,24 +111,27 @@ int queue_remove (queue_t **queue, queue_t *elem) {
     if (current_node != elem) {
         fprintf(stderr, "queue_remove: elemento não pertence à fila indicada\n");
         return -4;
-    } else {
-        // caso nenhuma das condições acima seja verdadeira, então o elemento pode ser removido da fila
-        // se a fila tiver apenas um elemento
-        if (queue_size(*queue) == 1) {
-            *queue = NULL;
-        } else { // se a fila tiver mais de um elemento
-            elem->prev->next = elem->next;
-            elem->next->prev = elem->prev;
-            // se o elemento a ser removido é o primeiro da fila
-            if (*queue == elem) {
-                queue_t *aux = elem->prev;
-                *queue = elem->next;
-                (*queue)->prev = aux;
-            }
-        }
-        // reseta os ponteiros do elemento removido
-        elem->next = NULL;
-        elem->prev = NULL;
     }
+
+    // caso nenhuma das condições acima seja verdadeira, então o elemento pode ser removido da fila
+    // se a fila tiver apenas um elemento
+    if (queue_size(*queue) == 1) {
+        (*queue)->next = NULL;
+        (*queue)->prev = NULL;
+        *queue = NULL;
+    } else { // se a fila tiver mais de um elemento
+        elem->prev->next = elem->next;
+        elem->next->prev = elem->prev;
+        // se o elemento a ser removido é o primeiro da fila
+        if (*queue == elem) {
+            queue_t *aux = elem->prev;
+            *queue = elem->next;
+            (*queue)->prev = aux;
+        }
+    }
+    // reseta os ponteiros do elemento removido
+    elem->next = NULL;
+    elem->prev = NULL;
+
     return 0;
 }
