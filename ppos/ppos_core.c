@@ -6,12 +6,15 @@
 //#define DEBUG
 #define STACKSIZE 64*1024	/* tamanho de pilha das threads */
 
-task_t current_task, main_task;
-ucontext_t old_context, current_context, main_context;
-int task_count = 0;
+task_t *current_task, main_task;
+int task_count = 1;
 
 void ppos_init () {
     setvbuf(stdout, 0, _IONBF, 0);
+
+    getcontext(&main_task.context);
+    current_task = &main_task;
+    main_task.id = 1;
 }
 
 int task_init(task_t *task, void (*start_func)(void *), void *arg) {
@@ -39,23 +42,20 @@ int task_init(task_t *task, void (*start_func)(void *), void *arg) {
 }
 
 int task_switch(task_t *task) {
-    // saving current context
-    if (getcontext(&old_context) == -1) {
-        perror("[task_switch] Erro ao obter o contexto atual: ");
+
+    if (task == NULL) {
+        perror("[task_switch] Tarefa nula: ");
         return -1;
     }
 
-    current_context = task->context;
+    task_t *old_task = current_task;
+    current_task = task;
 
     #ifdef DEBUG
         printf("[task_switch] Trocando contexto para %d\n", task->id);
     #endif
 
-    if (swapcontext(&old_context, &current_context) == -1) {
-        perror("[task_switch] Erro ao trocar de contexto: ");
-        return -1;
-    }
-
+    swapcontext(&old_task->context, &task->context);
     return 0;
 }
 
@@ -66,10 +66,19 @@ void task_exit(int exit_code) {
     if (exit_code != 0) {
         perror("[task_exit] Erro na finalização da tarefa: ");
     }
-    swapcontext(&current_context, &main_context);
+
+    if (&main_task == NULL) {
+        perror("[task_exit] Tarefa nula: ");
+        return;
+    }
+
+    task_switch(&main_task);
 }
 
 int task_id (){
-    return current_task.id;
-    return 0;
+    if (!current_task){
+        perror("[task_id] Tarefa nula: ");
+        return 0;
+    }
+    return current_task->id;
 }
