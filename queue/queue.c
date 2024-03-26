@@ -44,20 +44,20 @@ void queue_print (char *name, queue_t *queue, void print_elem (void*) ) {
 int queue_append (queue_t **queue, queue_t *elem) {
     // - a fila deve existir
     if (queue == NULL) {
-        fprintf(stderr, "queue_append: fila não existe\n");
+        perror("WARNING [queue_append] fila não existe\n");
         return -1;
     }
 
     // - o elemento deve existir
     if (elem == NULL) {
-        fprintf(stderr, "queue_append: elemento não existe\n");
+        perror("WARNING [queue_append] elemento não existe\n");
         return -2;
     }
 
     // - o elemento nao deve estar em outra fila
     // se o elemento já está em outra fila, então elem->next e elem->prev não podem ser NULL
     if (elem->next != NULL || elem->prev != NULL) {
-        fprintf(stderr, "queue_append: elemento já está em outra fila\n");
+        perror("WARNING [queue_append] elemento já está em outra fila\n");
         return -3;
     }
 
@@ -82,19 +82,19 @@ int queue_append (queue_t **queue, queue_t *elem) {
 int queue_remove (queue_t **queue, queue_t *elem) {
     // - a fila deve existir
     if (queue == NULL) {
-        fprintf(stderr, "queue_remove: fila não existe\n");
+        perror("WARNING [queue_remove] fila não existe\n");
         return -1;
     }
 
     // - a fila nao deve estar vazia
     if (queue_size(*queue) == 0) {
-        fprintf(stderr, "queue_remove: fila está vazia\n");
+        perror("WARNING [queue_remove] fila está vazia\n");
         return -2;
     }
 
     // - o elemento deve existir
     if (elem == NULL) {
-        fprintf(stderr, "queue_remove: elemento não existe\n");
+        perror("WARNING [queue_remove] elemento não existe\n");
         return -3;
     }
 
@@ -109,7 +109,7 @@ int queue_remove (queue_t **queue, queue_t *elem) {
     } while (current_node != *queue);
 
     if (current_node != elem) {
-        fprintf(stderr, "queue_remove: elemento não pertence à fila indicada\n");
+        perror("WARNING [queue_remove] elemento não pertence à fila indicada\n");
         return -4;
     }
 
