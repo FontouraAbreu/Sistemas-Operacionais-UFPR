@@ -10,7 +10,7 @@
 #define SUSPENSA 2
 #define TERMINADA 3
 
-//#define DEBUG
+#define DEBUG
 #define STACKSIZE 64*1024	/* tamanho de pilha das threads */
 
 task_t *current_task, main_task, dispatcher_task;
@@ -20,6 +20,9 @@ queue_t *ready_queue, *suspended_queue;
 task_t *scheduler() {
     // se a fila de prontas estiver vazia, retorna nulo
     if (ready_queue == NULL) {
+        #ifdef DEBUG
+            printf("[scheduler] Fila de prontas vazia\n");
+        #endif
         return NULL;
     }
 
@@ -28,18 +31,33 @@ task_t *scheduler() {
     // remove a tarefa da fila de prontas
     queue_remove(&ready_queue, (queue_t *) first_task_in_queue);
 
+    #ifdef DEBUG
+        printf("[scheduler] Tarefa %d escolhida\n", first_task_in_queue->id);
+    #endif
+
     // retorna a primeira tarefa da fila de prontas
     return first_task_in_queue;
 }
 
 void dispatcher_body(void *arg) {
+    #ifdef DEBUG
+        printf("[dispatcher_body] Iniciando dispatcher\n");
+        printf("[dispatcher_body] Fila de prontas com %d tarefas\n", queue_size(ready_queue));
+    #endif
     // retira o dispatcher da fila de prontas, para evitar que ele ative a si próprio
     queue_remove((queue_t **) &ready_queue, (queue_t *) &dispatcher_task);
+    
+    #ifdef DEBUG
+        printf("[dispatcher_body] Dispatcher removido da fila de prontas\n");
+    #endif
 
-    task_t *next_task;
+    task_t *next_task = NULL;
     // enquanto houverem tarefas de usuário
     while (queue_size(ready_queue) > 0) {
         // escolhe a próxima tarefa a executar
+        #ifdef DEBUG
+            printf("[dispatcher_body] Escolhendo próxima tarefa\n");
+        #endif
         next_task = scheduler();
 
         // se houver uma próxima tarefa
@@ -58,7 +76,6 @@ void dispatcher_body(void *arg) {
                     break;
                 // se a tarefa foi encerrada, a remove da fila de prontas
                 case TERMINADA: // 3
-                    queue_remove((queue_t **) &ready_queue, (queue_t *) next_task);
                     free(next_task->context.uc_stack.ss_sp);
                     next_task->context.uc_stack.ss_sp = NULL;
                     next_task->context.uc_stack.ss_size = 0;
@@ -86,8 +103,11 @@ void ppos_init () {
     suspended_queue = NULL;
 
     /* Inicializa a tarefa dispatcher */
+    #ifdef DEBUG
+        printf("[dispatcher_body] Tarefa dispatcher criada\n");
+    #endif
+
     task_init(&dispatcher_task, (void *) dispatcher_body, NULL);
-    queue_append(&ready_queue, (queue_t *) &dispatcher_task);
 
     #ifdef DEBUG
         printf("[ppos_init] PPos iniciado\n");
@@ -106,7 +126,7 @@ int task_init(task_t *task, void (*start_func)(void *), void *arg) {
         task->context.uc_stack.ss_flags = 0;
         task->context.uc_link = 0;
     } else {
-        perror("[task_init] Erro na criação da pilha: ");
+        perror("WARNING [task_init] Erro na criação da pilha: ");
         return -1;
     }
 
@@ -116,16 +136,21 @@ int task_init(task_t *task, void (*start_func)(void *), void *arg) {
     /* Inicializa os campos da task */
     task->id = task_count++;
     task->status = PRONTA; // 0: pronta, 1: rodando, 2: suspensa
+
+    /* Adiciona a task na fila de prontas */
+    queue_append(&ready_queue, (queue_t *) task);
+
     #ifdef DEBUG
-        printf("[task_init] Tarefa %d criada\n", task->id);
+        printf("[task_init] Tarefa %d criada e adicionada na fila de prontas\n", task->id);
     #endif
+
     return task->id;
 }
 
 int task_switch(task_t *task) {
     /* Verifica se a tarefa é nula */
     if (task == NULL) {
-        perror("[task_switch] Tarefa nula: ");
+        perror("WARNING [task_switch] Tarefa nula: ");
         return -1;
     }
 
@@ -134,32 +159,39 @@ int task_switch(task_t *task) {
     current_task = task;
 
     #ifdef DEBUG
-        printf("[task_switch] Trocando contexto para %d\n", task->id);
+        int id = task_id();
+        if (id == 1)
+            printf("[task_switch] Trocando contexto para o dispatcher\n");
+        else
+            printf("[task_switch] Trocando contexto para %d\n", id);
     #endif
 
+    task->status = RODANDO;
     /* Troca o contexto */
     swapcontext(&old_task->context, &task->context);
     return 0;
 }
 
 void task_exit(int exit_code) {
+    /* se o status de saída for diferente de 0, imprime erro */
+    if (exit_code != 0) {
+        perror("WARNING [task_exit] Erro na finalização da tarefa: ");
+    }
+
     #ifdef DEBUG
         printf("[task_exit] Tarefa %d encerrada\n", task_id());
     #endif
-    /* se o status de saída for diferente de 0, imprime erro */
-    if (exit_code != 0) {
-        perror("[task_exit] Erro na finalização da tarefa: ");
-    }
 
     /* retorna para a tarefa principal */
+    current_task->status = TERMINADA;
     task_switch(&dispatcher_task);
 }
 
 int task_id (){
     /* se a tarefa for nula, imprime erro */
     if (!current_task){
-        perror("[task_id] Tarefa nula: ");
-        return 0;
+        perror("WARNING [task_id] Tarefa nula: ");
+        return -1;
     }
     return current_task->id;
 }
@@ -167,12 +199,10 @@ int task_id (){
 void task_yield() {
     /* se a tarefa for nula, imprime erro */
     if (!current_task){
-        perror("[task_yield] Tarefa nula: ");
+        perror("WARNING [task_yield] Tarefa nula: ");
         return;
     }
 
-
     current_task->status = PRONTA;
-    queue_append(&ready_queue, (queue_t *) current_task);
-    task_switch(&main_task);
+    task_switch(&dispatcher_task);
 }
