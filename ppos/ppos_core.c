@@ -9,9 +9,14 @@
 #define RODANDO 1
 #define SUSPENSA 2
 #define TERMINADA 3
-#define DEFAULT_PRIO 0
+
 #define DISPATCHER_ID 1
 #define MAIN_ID 0
+
+#define DEFAULT_PRIO 0
+#define HIGH_PRIO -20
+#define LOW_PRIO 20
+#define AGING_FACTOR -1
 
 // #define DEBUG
 #define STACKSIZE 64*1024	/* tamanho de pilha das threads */
@@ -29,15 +34,33 @@ task_t *scheduler() {
         return NULL;
     }
 
+    task_t *choosen_task = (task_t *) ready_queue;
+    task_t *current_task = (task_t *) ready_queue;
 
-    task_t *first_task_in_queue = (task_t *) ready_queue;
+    /* percorre a fila de prontas procurando pela tarefa com maior prioridade */
+    do {
+        task_t *next_task = (task_t *) current_task->next;
+
+        // se a prioridade da tarefa atual for menor que a prioridade da próxima tarefa
+        if (current_task->prio > next_task->prio) {
+            choosen_task = next_task;
+            
+            if (current_task->prio > HIGH_PRIO)
+                current_task->prio += AGING_FACTOR;
+            else
+                current_task->prio = HIGH_PRIO;
+        }
+        
+        current_task = next_task;
+    } while (current_task != (task_t *)ready_queue);    
+    
 
     #ifdef DEBUG
-        printf("[scheduler] Tarefa %d escolhida\n", first_task_in_queue->id);
+        printf("[scheduler] Tarefa %d escolhida\n", choosen_task->id);
     #endif
 
     // retorna a primeira tarefa da fila de prontas
-    return first_task_in_queue;
+    return choosen_task;
 }
 
 void dispatcher_body(void *arg) {
