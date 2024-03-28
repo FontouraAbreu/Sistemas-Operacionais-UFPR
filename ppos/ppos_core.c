@@ -86,11 +86,9 @@ void dispatcher_body(void *arg) {
 
         // se houver uma próxima tarefa
         if (next_task) {
-
-            // troca a tarefa atual pela primeira tarefa da fila de prontas
-            task_t *first_task_in_queue = (task_t *) ready_queue;
             // remove a tarefa da fila de prontas
-            queue_remove(&ready_queue, (queue_t *) first_task_in_queue);
+            queue_remove(&ready_queue, (queue_t *) next_task);
+
             // transfere o controle para a proxima tarefa
             task_switch(next_task);
 
