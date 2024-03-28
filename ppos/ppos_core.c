@@ -9,12 +9,15 @@
 #define RODANDO 1
 #define SUSPENSA 2
 #define TERMINADA 3
+#define DEFAULT_PRIO 0
+#define DISPATCHER_ID 1
+#define MAIN_ID 0
 
 // #define DEBUG
 #define STACKSIZE 64*1024	/* tamanho de pilha das threads */
 
 task_t *current_task, main_task, dispatcher_task;
-int task_count = 1; // task_count começa em 1, pois o dispatcher é a primeira a ser criada
+int task_count = DISPATCHER_ID; // task_count começa em 1, pois o dispatcher é a primeira a ser criada
 queue_t *ready_queue, *suspended_queue;
 
 task_t *scheduler() {
@@ -105,7 +108,7 @@ void ppos_init () {
     /* Inicializa o contexto da main */
     getcontext(&main_task.context);
     current_task = &main_task;
-    main_task.id = 0;
+    main_task.id = MAIN_ID;
 
     /* Inicializa as filas */
     ready_queue = NULL;
@@ -145,6 +148,7 @@ int task_init(task_t *task, void (*start_func)(void *), void *arg) {
     /* Inicializa os campos da task */
     task->id = task_count++;
     task->status = PRONTA; // 0: pronta, 1: rodando, 2: suspensa
+    task->prio = DEFAULT_PRIO;
 
     /* Adiciona a task na fila de prontas */
     queue_append(&ready_queue, (queue_t *) task);
@@ -170,7 +174,7 @@ int task_switch(task_t *task) {
 
     #ifdef DEBUG
         int id = task_id();
-        if (id == 1)
+        if (id == DISPATCHER_ID)
             printf("[task_switch] Trocando contexto para o dispatcher\n");
         else
             printf("[task_switch] Trocando contexto para %d\n", id);
@@ -191,14 +195,14 @@ void task_exit(int exit_code) {
 
     /* se a tarefa que está encerrando é o dispatcher */
     switch (task_id()) {
-        case 0: // tarefa Main
+        case MAIN_ID: // tarefa Main
             #ifdef DEBUG
                 printf("[task_exit] Tarefa Main encerrada\n");
             #endif
             current_task->status = TERMINADA;
             task_switch(&dispatcher_task);
             break;
-        case 1: // tarefa Dispatcher
+        case DISPATCHER_ID: // tarefa Dispatcher
             #ifdef DEBUG
                 printf("[task_exit] Tarefa Dispatcher encerrada\n");
             #endif
@@ -234,4 +238,24 @@ void task_yield() {
 
     current_task->status = PRONTA;
     task_switch(&dispatcher_task);
+}
+
+void task_setprio(task_t *task, int prio) {
+    /* se a tarefa for nula, imprime erro */
+    if (!task){
+        perror("WARNING [task_setprio] Tarefa nula: ");
+        return;
+    }
+
+    task->prio = prio;
+}
+
+int task_getprio(task_t *task) {
+    /* se a tarefa for nula, imprime erro */
+    if (!task){
+        perror("WARNING [task_getprio] Tarefa nula: ");
+        return -1;
+    }
+
+    return task->prio;
 }
