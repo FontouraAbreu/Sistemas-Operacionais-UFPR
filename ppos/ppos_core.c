@@ -10,11 +10,11 @@
 #define SUSPENSA 2
 #define TERMINADA 3
 
-#define DEBUG
+// #define DEBUG
 #define STACKSIZE 64*1024	/* tamanho de pilha das threads */
 
 task_t *current_task, main_task, dispatcher_task;
-int task_count = 1;
+int task_count = 1; // task_count começa em 1, pois o dispatcher é a primeira a ser criada
 queue_t *ready_queue, *suspended_queue;
 
 task_t *scheduler() {
@@ -26,10 +26,8 @@ task_t *scheduler() {
         return NULL;
     }
 
-    // troca a tarefa atual pela primeira tarefa da fila de prontas
+
     task_t *first_task_in_queue = (task_t *) ready_queue;
-    // remove a tarefa da fila de prontas
-    queue_remove(&ready_queue, (queue_t *) first_task_in_queue);
 
     #ifdef DEBUG
         printf("[scheduler] Tarefa %d escolhida\n", first_task_in_queue->id);
@@ -42,7 +40,6 @@ task_t *scheduler() {
 void dispatcher_body(void *arg) {
     #ifdef DEBUG
         printf("[dispatcher_body] Iniciando dispatcher\n");
-        printf("[dispatcher_body] Fila de prontas com %d tarefas\n", queue_size(ready_queue));
     #endif
     // retira o dispatcher da fila de prontas, para evitar que ele ative a si próprio
     queue_remove((queue_t **) &ready_queue, (queue_t *) &dispatcher_task);
@@ -56,14 +53,19 @@ void dispatcher_body(void *arg) {
     while (queue_size(ready_queue) > 0) {
         // escolhe a próxima tarefa a executar
         #ifdef DEBUG
+            printf("[dispatcher_body] Fila de prontas com %d tarefas\n", queue_size(ready_queue));
             printf("[dispatcher_body] Escolhendo próxima tarefa\n");
         #endif
         next_task = scheduler();
 
         // se houver uma próxima tarefa
         if (next_task) {
+
+            // troca a tarefa atual pela primeira tarefa da fila de prontas
+            task_t *first_task_in_queue = (task_t *) ready_queue;
+            // remove a tarefa da fila de prontas
+            queue_remove(&ready_queue, (queue_t *) first_task_in_queue);
             // transfere o controle para a proxima tarefa
-            next_task->status = RODANDO; // 1: rodando
             task_switch(next_task);
 
             switch (next_task->status) {
@@ -76,6 +78,9 @@ void dispatcher_body(void *arg) {
                     break;
                 // se a tarefa foi encerrada, a remove da fila de prontas
                 case TERMINADA: // 3
+                    #ifdef DEBUG
+                        printf("[dispatcher_body] Desalocando pilha da tarefa %d\n", next_task->id);
+                    #endif
                     free(next_task->context.uc_stack.ss_sp);
                     next_task->context.uc_stack.ss_sp = NULL;
                     next_task->context.uc_stack.ss_size = 0;
@@ -84,6 +89,10 @@ void dispatcher_body(void *arg) {
             }
         }
     }
+
+    #ifdef DEBUG
+        printf("[dispatcher_body] Todas as tarefas encerradas, encerrando dispatcher\n");
+    #endif
 
     // encerra o dispatcher
     task_exit(0);
@@ -96,7 +105,7 @@ void ppos_init () {
     /* Inicializa o contexto da main */
     getcontext(&main_task.context);
     current_task = &main_task;
-    main_task.id = 1;
+    main_task.id = 0;
 
     /* Inicializa as filas */
     ready_queue = NULL;
@@ -142,6 +151,7 @@ int task_init(task_t *task, void (*start_func)(void *), void *arg) {
 
     #ifdef DEBUG
         printf("[task_init] Tarefa %d criada e adicionada na fila de prontas\n", task->id);
+        printf("[task_init] Fila de prontas com %d tarefas\n", queue_size(ready_queue));
     #endif
 
     return task->id;
@@ -166,7 +176,7 @@ int task_switch(task_t *task) {
             printf("[task_switch] Trocando contexto para %d\n", id);
     #endif
 
-    task->status = RODANDO;
+    task->status = RODANDO; // 1: rodando
     /* Troca o contexto */
     swapcontext(&old_task->context, &task->context);
     return 0;
@@ -178,13 +188,32 @@ void task_exit(int exit_code) {
         perror("WARNING [task_exit] Erro na finalização da tarefa: ");
     }
 
-    #ifdef DEBUG
-        printf("[task_exit] Tarefa %d encerrada\n", task_id());
-    #endif
 
-    /* retorna para a tarefa principal */
-    current_task->status = TERMINADA;
-    task_switch(&dispatcher_task);
+    /* se a tarefa que está encerrando é o dispatcher */
+    switch (task_id()) {
+        case 0: // tarefa Main
+            #ifdef DEBUG
+                printf("[task_exit] Tarefa Main encerrada\n");
+            #endif
+            current_task->status = TERMINADA;
+            task_switch(&dispatcher_task);
+            break;
+        case 1: // tarefa Dispatcher
+            #ifdef DEBUG
+                printf("[task_exit] Tarefa Dispatcher encerrada\n");
+            #endif
+            exit(exit_code);
+            break;
+        default:
+            /* retorna para a tarefa principal */
+            #ifdef DEBUG
+                printf("[task_exit] Tarefa %d encerrada\n", task_id());
+            #endif
+            task_count--;
+            current_task->status = TERMINADA;
+            task_switch(&dispatcher_task);
+            break;
+    }
 }
 
 int task_id (){
