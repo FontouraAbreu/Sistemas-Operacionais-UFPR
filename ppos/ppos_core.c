@@ -35,26 +35,50 @@ task_t *scheduler() {
     }
 
     task_t *choosen_task = (task_t *) ready_queue;
-    task_t *current_task = (task_t *) ready_queue;
+    task_t *loop_current_task = (task_t *) ready_queue;
 
     /* percorre a fila de prontas procurando pela tarefa com maior prioridade */
     do {
-        task_t *next_task = (task_t *) current_task->next;
-
-        // se a prioridade da tarefa atual for menor que a prioridade da próxima tarefa
-        if (current_task->prio > next_task->prio) {
+        task_t *next_task = (task_t *) loop_current_task->next;
+        int next_task_total_prio = task_getprio(next_task) + next_task->prio_d;
+        int choosen_task_total_prio = task_getprio(choosen_task) + choosen_task->prio_d;
+        // se a prioridade da proxima tarefa for menor que a prioridade da tarefa atual
+        if (next_task_total_prio < choosen_task_total_prio) {
+            #ifdef DEBUG
+                printf("[scheduler] Tarefa %d tem prioridade %d maior que tarefa %d com prioridade %d\n", next_task->id, next_task_total_prio, choosen_task->id, choosen_task_total_prio);
+            #endif
             choosen_task = next_task;
         }
         
-        current_task = next_task;
-    } while (current_task != (task_t *)ready_queue);    
+        // avança para a próxima tarefa
+        loop_current_task = next_task;
+    } while (loop_current_task != (task_t *)ready_queue);    
 
     // envelhece as tarefas
-    current_task = (task_t *) ready_queue;
+    loop_current_task = (task_t *) ready_queue;
     do {
-        current_task->prio += AGING_FACTOR;
-        current_task = (task_t *) current_task->next;
-    } while (current_task != (task_t *) ready_queue && current_task != choosen_task);
+        // se a tarefa atual for a tarefa escolhida
+        if (loop_current_task == choosen_task) {
+            #ifdef DEBUG
+                printf("[scheduler] Ignorando a tarefa escolhida (%d) durante o envelhecimento\n", choosen_task->id);
+            #endif
+            loop_current_task = (task_t *) loop_current_task->next;
+            continue;
+        }
+
+        // se a prioridade não atingiu o limite superior
+        int total_prio = task_getprio(loop_current_task) + loop_current_task->prio_d;
+        if (total_prio > HIGH_PRIO)
+            loop_current_task->prio_d += AGING_FACTOR;
+        
+        #ifdef DEBUG
+            printf("[scheduler] Envelhecendo tarefa %d para prioridade %d\n", loop_current_task->id, total_prio);
+        #endif
+
+        // avança para a próxima tarefa
+        loop_current_task = (task_t *) loop_current_task->next;
+    // enquanto não chegar ao final da fila de prontas
+    } while (loop_current_task != (task_t *) ready_queue);
     
 
     #ifdef DEBUG
@@ -85,7 +109,6 @@ void dispatcher_body(void *arg) {
             printf("[dispatcher_body] Escolhendo próxima tarefa\n");
         #endif
         next_task = scheduler();
-        next_task->prio = DEFAULT_PRIO;
 
         // se houver uma próxima tarefa
         if (next_task) {
@@ -94,6 +117,10 @@ void dispatcher_body(void *arg) {
 
             // transfere o controle para a proxima tarefa
             task_switch(next_task);
+            next_task->prio_d = DEFAULT_PRIO;
+            #ifdef DEBUG
+                printf("[dispatcher_body] Resetando prioridade dinâmica da tarefa %d para %d\n", next_task->id, DEFAULT_PRIO);
+            #endif
 
             switch (next_task->status) {
                 case PRONTA: // 0
@@ -172,7 +199,7 @@ int task_init(task_t *task, void (*start_func)(void *), void *arg) {
     /* Inicializa os campos da task */
     task->id = task_count++;
     task->status = PRONTA; // 0: pronta, 1: rodando, 2: suspensa
-    task->prio = DEFAULT_PRIO;
+    task_setprio(task, DEFAULT_PRIO);
 
     /* Adiciona a task na fila de prontas */
     queue_append(&ready_queue, (queue_t *) task);
@@ -265,21 +292,39 @@ void task_yield() {
 }
 
 void task_setprio(task_t *task, int prio) {
-    /* se a tarefa for nula, imprime erro */
-    if (task == NULL){
-        perror("WARNING [task_setprio] Tarefa nula: ");
-        return;
+    /* verificando limites */ 
+    if (prio > LOW_PRIO) {
+        #ifdef DEBUG
+            printf("[task_setprio] Prioridade %d maior que o limite superior, setando para %d\n", prio, LOW_PRIO);
+        #endif
+        prio = LOW_PRIO;
     }
 
-    task->prio = prio;
+    if (prio < HIGH_PRIO) {
+        #ifdef DEBUG
+            printf("[task_setprio] Prioridade %d menor que o limite inferior, setando para %d\n", prio, HIGH_PRIO);
+        #endif
+        prio = HIGH_PRIO;
+    }
+
+    /* se a tarefa for nula, imprime erro */
+    if (task == NULL){
+        #ifdef DEBUG
+            printf("[task_setprio] Tarefa nula, setando prioridade para a tarefa atual\n");
+        #endif
+        current_task->prio_e = prio;
+    }
+
+    #ifdef DEBUG
+        printf("[task_setprio] Setando prioridade da tarefa %d para %d\n", task->id, prio);
+    #endif
+    task->prio_e = prio;
 }
 
 int task_getprio(task_t *task) {
     /* se a tarefa for nula, imprime erro */
-    if (task == NULL){
-        perror("WARNING [task_getprio] Tarefa nula: ");
-        return -1;
-    }
+    if (task == NULL)
+        return current_task->prio_e;
 
-    return task->prio;
+    return task->prio_e;
 }
