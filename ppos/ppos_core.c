@@ -44,15 +44,17 @@ task_t *scheduler() {
         // se a prioridade da tarefa atual for menor que a prioridade da próxima tarefa
         if (current_task->prio > next_task->prio) {
             choosen_task = next_task;
-            
-            if (current_task->prio > HIGH_PRIO)
-                current_task->prio += AGING_FACTOR;
-            else
-                current_task->prio = HIGH_PRIO;
         }
         
         current_task = next_task;
     } while (current_task != (task_t *)ready_queue);    
+
+    // envelhece as tarefas
+    current_task = (task_t *) ready_queue;
+    do {
+        current_task->prio += AGING_FACTOR;
+        current_task = (task_t *) current_task->next;
+    } while (current_task != (task_t *) ready_queue && current_task != choosen_task);
     
 
     #ifdef DEBUG
@@ -83,6 +85,7 @@ void dispatcher_body(void *arg) {
             printf("[dispatcher_body] Escolhendo próxima tarefa\n");
         #endif
         next_task = scheduler();
+        next_task->prio = DEFAULT_PRIO;
 
         // se houver uma próxima tarefa
         if (next_task) {
@@ -263,7 +266,7 @@ void task_yield() {
 
 void task_setprio(task_t *task, int prio) {
     /* se a tarefa for nula, imprime erro */
-    if (!task){
+    if (task == NULL){
         perror("WARNING [task_setprio] Tarefa nula: ");
         return;
     }
@@ -273,7 +276,7 @@ void task_setprio(task_t *task, int prio) {
 
 int task_getprio(task_t *task) {
     /* se a tarefa for nula, imprime erro */
-    if (!task){
+    if (task == NULL){
         perror("WARNING [task_getprio] Tarefa nula: ");
         return -1;
     }
