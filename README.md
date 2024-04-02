@@ -4,6 +4,10 @@ This repository contains the exercises and projects developed during the Operati
 
 ## Projects
 
+The projects aim to develop an educational operating system called `Ping Pong OS`. The projects are divided into 12 parts, each part is a new feature added to the operating system. The projects are implemented in C.
+
+The projects are:
+
 - Project 1: [Queue implementation](https://wiki.inf.ufpr.br/maziero/doku.php?id=so:biblioteca_de_filas)
 - Project 2: [Task implementation](https://wiki.inf.ufpr.br/maziero/doku.php?id=so:gestao_de_tarefas)
 - Project 3: [Task Dispatcher implementation](https://wiki.inf.ufpr.br/maziero/doku.php?id=so:dispatcher)
