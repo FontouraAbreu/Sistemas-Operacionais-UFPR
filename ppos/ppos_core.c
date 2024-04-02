@@ -322,7 +322,7 @@ void task_setprio(task_t *task, int prio) {
 }
 
 int task_getprio(task_t *task) {
-    /* se a tarefa for nula, imprime erro */
+    /* se a tarefa for nula, retorna a prioridade da tarefa atual */
     if (task == NULL)
         return current_task->prio_e;
 
