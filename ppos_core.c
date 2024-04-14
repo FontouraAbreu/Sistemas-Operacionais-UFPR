@@ -3,7 +3,7 @@
 #include <stdlib.h>
 #include "ppos.h"
 #include "ppos_data.h"
-#include "../queue/queue.h"
+#include "queue.h"
 
 #define PRONTA 0
 #define RODANDO 1

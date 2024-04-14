@@ -9,8 +9,8 @@ ppos: queue.o ppos_core.o test.o
 	$(CC) -o ppos_core queue.o ppos_core.o test.o -lm
 
 # regras de compilação
-queue.o: ../queue/queue.c ../queue/queue.h 
-	$(CC) $(CFLAGS) -c ../queue/queue.c -o queue.o
+queue.o: queue.c queue.h 
+	$(CC) $(CFLAGS) -c queue.c -o queue.o
 	
 ppos_core.o: ppos_core.c
 	$(CC) $(CFLAGS) -c ppos_core.c -o ppos_core.o
