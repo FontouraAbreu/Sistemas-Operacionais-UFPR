@@ -1,7 +1,7 @@
 # GRR20206873 Vinicius Fontoura de Abreu
-CFLAGS = -Wall -g -std=c99
+CFLAGS = -Wall -g -std=gnu99
 CC = gcc
-TEST_FILE = pingpong-scheduler.c
+TEST_FILE = pingpong-preempcao.c
 # regras de ligação
 all: ppos
 
