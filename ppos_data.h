@@ -8,6 +8,11 @@
 #define __PPOS_DATA__
 
 #include <ucontext.h>		// biblioteca POSIX de trocas de contexto
+#include <signal.h>
+#include <sys/time.h> 
+
+typedef struct sigaction ppos_sigaction_t;
+typedef struct itimerval ppos_timer_t;
 
 // Estrutura que define um Task Control Block (TCB)
 typedef struct task_t
@@ -18,6 +23,9 @@ typedef struct task_t
   short status ;			// pronta, rodando, suspensa, ...
   int prio_e;        // prioridade estatica da tarefa
   int prio_d;        // prioridade dinamica da tarefa
+  unsigned int quantum; // quantum restante da tarefa
+  unsigned int type; // tipo da tarefa (0 = user task, 1 = system task)
+  unsigned int activations; // numero de ativacoes da tarefa
   // ... (outros campos serão adicionados mais tarde)
 } task_t ;
 
