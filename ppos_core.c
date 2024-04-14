@@ -1,29 +1,53 @@
 // GRR20206873 Vinicius Fontoura de Abreu
 #include <stdio.h>
 #include <stdlib.h>
+#include <sys/time.h>
+#include <signal.h>
+
+
 #include "ppos.h"
 #include "ppos_data.h"
 #include "queue.h"
 
+/* STATUS DAS TAREFAS */
 #define PRONTA 0
 #define RODANDO 1
 #define SUSPENSA 2
 #define TERMINADA 3
 
+/* IDS DA MAIN E DISPATCHER */
 #define DISPATCHER_ID 1
 #define MAIN_ID 0
 
+#define SYSTEM_TASK 1
+#define USER_TASK 0
+
+/* PRIORIDADES */
 #define DEFAULT_PRIO 0
 #define HIGH_PRIO -20
 #define LOW_PRIO 20
 #define AGING_FACTOR -1
 
+/* DEFINES DO CLOCK */
+#define CLOCK_INITIAL_VALUE_S 0
+#define CLOCK_INITIAL_VALUE_US 2000
+#define CLOCK_MAX_VALUE_S 0
+#define CLOCK_MAX_VALUE_US 1000
+#define QUANTUM 20
+
+
 // #define DEBUG
 #define STACKSIZE 64*1024	/* tamanho de pilha das threads */
 
-task_t *current_task, main_task, dispatcher_task;
+task_t *current_task, main_task, dispatcher_task; // tarefas atual, principal e dispatcher
 int task_count = DISPATCHER_ID; // task_count começa em 1, pois o dispatcher é a primeira a ser criada
-queue_t *ready_queue, *suspended_queue;
+queue_t *ready_queue, *suspended_queue; // filas de prontas e suspensas
+
+unsigned int clock; // clock do sistema
+
+ppos_sigaction_t action; // estrutura que define um tratador de sinal
+
+ppos_timer_t timer; // estrutura de inicialização do timer
 
 task_t *scheduler() {
     // se a fila de prontas estiver vazia, retorna nulo
@@ -152,6 +176,16 @@ void dispatcher_body(void *arg) {
     task_exit(0);
 }
 
+void tick_handler(int signum) {
+    clock++;
+
+    /* se a tarefa atual for o dispatcher, retorna */
+    if (current_task->type == SYSTEM_TASK || --current_task->quantum > 0) 
+        return;
+
+    /* decrementa o quantum da tarefa atual */
+    task_yield();
+}
 
 void ppos_init () {
     setvbuf(stdout, 0, _IONBF, 0);
@@ -160,10 +194,14 @@ void ppos_init () {
     getcontext(&main_task.context);
     current_task = &main_task;
     main_task.id = MAIN_ID;
+    main_task.type = USER_TASK;
 
     /* Inicializa as filas */
     ready_queue = NULL;
     suspended_queue = NULL;
+
+    /* seta o clock do sistema pra 0 */
+    clock = 0;
 
     /* Inicializa a tarefa dispatcher */
     #ifdef DEBUG
@@ -171,7 +209,26 @@ void ppos_init () {
     #endif
 
     task_init(&dispatcher_task, (void *) dispatcher_body, NULL);
+    dispatcher_task.type = SYSTEM_TASK;
 
+    /* Inicializa o tratador de sinais */
+    action.sa_handler = tick_handler;
+    sigemptyset(&action.sa_mask);
+    action.sa_flags = 0;
+    if (sigaction(SIGALRM, &action, 0) < 0) {
+        perror("WARNING [ppos_init] Erro em sigaction: ");
+        exit(1);
+    }
+
+    /* Ajusta valores do temporizador */
+    timer.it_value.tv_usec = CLOCK_INITIAL_VALUE_US; // primeiro disparo, em micro-segundos
+    timer.it_value.tv_sec = CLOCK_INITIAL_VALUE_S; // primeiro disparo, em segundos
+    timer.it_interval.tv_usec = CLOCK_MAX_VALUE_US; // disparos subsequentes, em micro-segundos
+    timer.it_interval.tv_sec = CLOCK_MAX_VALUE_S; // disparos subsequentes, em segundos
+
+    if (setitimer(ITIMER_REAL, &timer, 0) < 0) {
+        perror("WARNING [ppos_init] Erro em itimer: ");
+    }
     #ifdef DEBUG
         printf("[ppos_init] PPos iniciado\n");
     #endif
@@ -200,6 +257,8 @@ int task_init(task_t *task, void (*start_func)(void *), void *arg) {
     task->id = task_count++;
     task->status = PRONTA; // 0: pronta, 1: rodando, 2: suspensa
     task_setprio(task, DEFAULT_PRIO);
+    task->quantum = QUANTUM;
+    task->type = USER_TASK;
 
     /* Adiciona a task na fila de prontas */
     queue_append(&ready_queue, (queue_t *) task);
@@ -232,6 +291,8 @@ int task_switch(task_t *task) {
     #endif
 
     task->status = RODANDO; // 1: rodando
+    task->activations++;
+    task->quantum = QUANTUM;
     /* Troca o contexto */
     swapcontext(&old_task->context, &task->context);
     return 0;
