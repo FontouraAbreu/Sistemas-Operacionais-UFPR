@@ -11,8 +11,6 @@
 #include <signal.h>
 #include <sys/time.h> 
 
-typedef struct sigaction ppos_sigaction_t;
-typedef struct itimerval ppos_timer_t;
 
 // Estrutura que define um Task Control Block (TCB)
 typedef struct task_t
@@ -26,6 +24,9 @@ typedef struct task_t
   unsigned int quantum; // quantum restante da tarefa
   unsigned int type; // tipo da tarefa (0 = user task, 1 = system task)
   unsigned int activations; // numero de ativacoes da tarefa
+  unsigned int start_time; // tempo de inicio da tarefa
+  unsigned int end_time; // tempo de termino da tarefa
+  unsigned int processor_time; // tempo de processamento da tarefa
   // ... (outros campos serão adicionados mais tarde)
 } task_t ;
 
