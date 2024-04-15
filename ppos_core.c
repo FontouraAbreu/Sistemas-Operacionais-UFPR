@@ -30,10 +30,10 @@
 
 /* DEFINES DO CLOCK */
 #define CLOCK_INITIAL_VALUE_S 0
-#define CLOCK_INITIAL_VALUE_US 2000
-#define CLOCK_MAX_VALUE_S 0
-#define CLOCK_MAX_VALUE_US 1000
-#define QUANTUM 20
+#define CLOCK_INITIAL_VALUE_US 1000 // 1ms
+#define CLOCK_INTERVAL_VALUE_S 0
+#define CLOCK_INTERVAL_VALUE_US 1000 // 1ms
+#define QUANTUM 10
 
 
 // #define DEBUG
@@ -45,9 +45,9 @@ queue_t *ready_queue, *suspended_queue; // filas de prontas e suspensas
 
 unsigned int clock; // clock do sistema
 
-ppos_sigaction_t action; // estrutura que define um tratador de sinal
 
-ppos_timer_t timer; // estrutura de inicialização do timer
+struct sigaction action;
+struct itimerval timer;
 
 task_t *scheduler() {
     // se a fila de prontas estiver vazia, retorna nulo
@@ -125,6 +125,10 @@ void dispatcher_body(void *arg) {
     #endif
 
     task_t *next_task = NULL;
+    /* variáveis para calcular o tempo de execução das tarefas */
+    unsigned int current_task_start_time = 0;
+    unsigned int current_task_end_time = 0;
+
     // enquanto houverem tarefas de usuário
     while (queue_size(ready_queue) > 0) {
         // escolhe a próxima tarefa a executar
@@ -139,9 +143,21 @@ void dispatcher_body(void *arg) {
             // remove a tarefa da fila de prontas
             queue_remove(&ready_queue, (queue_t *) next_task);
 
+            // atualiza o tempo de início da tarefa
+            current_task_start_time = systime();
+
             // transfere o controle para a proxima tarefa
             task_switch(next_task);
+
+            // atualiza o tempo de término da tarefa
+            current_task_end_time = systime();
+
+            // atualiza o tempo de processamento total da tarefa
+            next_task->processor_time += current_task_end_time - current_task_start_time;
+
+            // atualiza a prioridade dinâmica da tarefa
             next_task->prio_d = DEFAULT_PRIO;
+
             #ifdef DEBUG
                 printf("[dispatcher_body] Resetando prioridade dinâmica da tarefa %d para %d\n", next_task->id, DEFAULT_PRIO);
             #endif
@@ -187,6 +203,10 @@ void tick_handler(int signum) {
     task_yield();
 }
 
+unsigned int systime() {
+    return clock;
+}
+
 void ppos_init () {
     setvbuf(stdout, 0, _IONBF, 0);
 
@@ -195,6 +215,7 @@ void ppos_init () {
     current_task = &main_task;
     main_task.id = MAIN_ID;
     main_task.type = USER_TASK;
+    main_task.activations++;
 
     /* Inicializa as filas */
     ready_queue = NULL;
@@ -202,14 +223,6 @@ void ppos_init () {
 
     /* seta o clock do sistema pra 0 */
     clock = 0;
-
-    /* Inicializa a tarefa dispatcher */
-    #ifdef DEBUG
-        printf("[dispatcher_body] Tarefa dispatcher criada\n");
-    #endif
-
-    task_init(&dispatcher_task, (void *) dispatcher_body, NULL);
-    dispatcher_task.type = SYSTEM_TASK;
 
     /* Inicializa o tratador de sinais */
     action.sa_handler = tick_handler;
@@ -223,12 +236,22 @@ void ppos_init () {
     /* Ajusta valores do temporizador */
     timer.it_value.tv_usec = CLOCK_INITIAL_VALUE_US; // primeiro disparo, em micro-segundos
     timer.it_value.tv_sec = CLOCK_INITIAL_VALUE_S; // primeiro disparo, em segundos
-    timer.it_interval.tv_usec = CLOCK_MAX_VALUE_US; // disparos subsequentes, em micro-segundos
-    timer.it_interval.tv_sec = CLOCK_MAX_VALUE_S; // disparos subsequentes, em segundos
+    timer.it_interval.tv_usec = CLOCK_INTERVAL_VALUE_US; // disparos subsequentes, em micro-segundos de cada intervalo
+    timer.it_interval.tv_sec = CLOCK_INTERVAL_VALUE_S; // disparos subsequentes, em segundos de cada intervalo
 
     if (setitimer(ITIMER_REAL, &timer, 0) < 0) {
         perror("WARNING [ppos_init] Erro em itimer: ");
     }
+
+    /* Inicializa a tarefa dispatcher */
+    #ifdef DEBUG
+        printf("[dispatcher_body] Tarefa dispatcher criada\n");
+    #endif
+
+    /* Inicializa a tarefa dispatcher */
+    task_init(&dispatcher_task, (void *) dispatcher_body, NULL);
+    dispatcher_task.type = SYSTEM_TASK;
+
     #ifdef DEBUG
         printf("[ppos_init] PPos iniciado\n");
     #endif
@@ -254,11 +277,14 @@ int task_init(task_t *task, void (*start_func)(void *), void *arg) {
     makecontext(&task->context, (void (*)(void)) start_func, 1, arg);
 
     /* Inicializa os campos da task */
-    task->id = task_count++;
+    task->id = task_count++; // id da tarefa
     task->status = PRONTA; // 0: pronta, 1: rodando, 2: suspensa
-    task_setprio(task, DEFAULT_PRIO);
-    task->quantum = QUANTUM;
-    task->type = USER_TASK;
+    task_setprio(task, DEFAULT_PRIO); // prioridade da tarefa
+    task->quantum = QUANTUM; // quantum da tarefa
+    task->type = USER_TASK; // tipo da tarefa (0 = user task, 1 = system task)
+    task->activations = 0; // numero de ativacoes da tarefa
+    task->start_time = systime(); // tempo de inicio da tarefa
+    task->processor_time = 0; // tempo de processamento da tarefa
 
     /* Adiciona a task na fila de prontas */
     queue_append(&ready_queue, (queue_t *) task);
@@ -291,8 +317,8 @@ int task_switch(task_t *task) {
     #endif
 
     task->status = RODANDO; // 1: rodando
-    task->activations++;
-    task->quantum = QUANTUM;
+    task->activations++; // incrementa o número de ativações da tarefa
+    task->quantum = QUANTUM; // reseta o quantum da tarefa
     /* Troca o contexto */
     swapcontext(&old_task->context, &task->context);
     return 0;
@@ -304,6 +330,13 @@ void task_exit(int exit_code) {
         perror("WARNING [task_exit] Erro na finalização da tarefa: ");
     }
 
+    current_task->end_time = systime();
+
+    printf("Task %d exit: execution time  %d ms, processor time  %d ms, %d activations\n", \
+     task_id(),\
+     current_task->end_time - current_task->start_time,\
+     current_task->processor_time,\
+     current_task->activations);
 
     /* se a tarefa que está encerrando é o dispatcher */
     switch (task_id()) {
