@@ -16,6 +16,7 @@
 typedef struct task_t
 {
   struct task_t *prev, *next ;		// ponteiros para usar em filas
+  struct task_t *tasks_waiting_for_conclusion; // ponteiro para a fila de tarefas esperando a conclusao da tarefa
   int id ;				// identificador da tarefa
   ucontext_t context ;			// contexto armazenado da tarefa
   short status ;			// pronta, rodando, suspensa, ...
