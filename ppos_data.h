@@ -10,13 +10,16 @@
 #include <ucontext.h>		// biblioteca POSIX de trocas de contexto
 #include <signal.h>
 #include <sys/time.h> 
+#include <unistd.h>
+#include "queue.h"
+
 
 
 // Estrutura que define um Task Control Block (TCB)
 typedef struct task_t
 {
   struct task_t *prev, *next ;		// ponteiros para usar em filas
-  struct task_t *tasks_waiting_for_conclusion; // ponteiro para a fila de tarefas esperando a conclusao da tarefa
+  struct queue_t *tasks_waiting_for_conclusion; // ponteiro para a fila de tarefas esperando a conclusao da tarefa
   int id ;				// identificador da tarefa
   ucontext_t context ;			// contexto armazenado da tarefa
   short status ;			// pronta, rodando, suspensa, ...
@@ -28,6 +31,7 @@ typedef struct task_t
   unsigned int start_time; // tempo de inicio da tarefa
   unsigned int end_time; // tempo de termino da tarefa
   unsigned int processor_time; // tempo de processamento da tarefa
+  int exit_code; // codigo de saida da tarefa
   // ... (outros campos serão adicionados mais tarde)
 } task_t ;
 
