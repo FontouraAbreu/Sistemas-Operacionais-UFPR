@@ -1,12 +1,13 @@
 # GRR20206873 Vinicius Fontoura de Abreu
 CFLAGS = -Wall -g -std=gnu99
+LFLAGS = -lpthread -lm
 CC = gcc
-TEST_FILE = pingpong-preempcao.c
+TEST_FILE = pingpong-wait.c
 # regras de ligação
 all: ppos
 
 ppos: queue.o ppos_core.o test.o
-	$(CC) -o ppos_core queue.o ppos_core.o test.o -lm
+	$(CC) -o ppos_core queue.o ppos_core.o test.o $(LFLAGS)
 
 # regras de compilação
 queue.o: queue.c queue.h 
@@ -16,7 +17,7 @@ ppos_core.o: ppos_core.c
 	$(CC) $(CFLAGS) -c ppos_core.c -o ppos_core.o
 
 test.o: $(TEST_FILE) queue.o ppos_core.o
-	$(CC) $(CFLAGS) -c $(TEST_FILE) -o test.o -lm
+	$(CC) $(CFLAGS) -c $(TEST_FILE) -o test.o $(LFLAGS)
 
 
 
