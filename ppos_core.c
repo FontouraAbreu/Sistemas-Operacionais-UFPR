@@ -40,7 +40,7 @@
 #define STACKSIZE 64*1024	/* tamanho de pilha das threads */
 
 task_t *current_task, main_task, dispatcher_task; // tarefas atual, principal e dispatcher
-int task_count = DISPATCHER_ID; // task_count começa em 1, pois o dispatcher é a primeira a ser criada
+int task_count = 1; // contador de tarefas deve começar em 1
 queue_t *ready_queue, *suspended_queue; // filas de prontas e suspensas
 
 unsigned int clock; // clock do sistema
@@ -172,22 +172,6 @@ void dispatcher_body(void *arg) {
                     break;
                 // se a tarefa foi encerrada, a remove da fila de prontas
                 case TERMINADA: // 3
-                    #ifdef DEBUG
-                        printf("[dispatcher_body] Tarefa %d encerrada\n", next_task->id);
-                    #endif
-                    #ifdef DEBUG
-                        printf("[dispatcher_body] Acordando todas as tarefas que estavam esperando pela tarefa %d\n", next_task->id);
-                    #endif
-                    // acorda todas as tarefas que estavam esperando pela tarefa
-                    while (next_task->tasks_waiting_for_conclusion) {
-                        task_t *task = (task_t *) next_task->tasks_waiting_for_conclusion;
-                        task_awake(task, (task_t **) task->tasks_waiting_for_conclusion);
-                        queue_remove((queue_t **) next_task->tasks_waiting_for_conclusion, (queue_t *) task);
-                    }
-
-                    #ifdef DEBUG
-                        printf("[dispatcher_body] Desalocando pilha da tarefa %d\n", next_task->id);
-                    #endif
                     free(next_task->context.uc_stack.ss_sp);
                     next_task->context.uc_stack.ss_sp = NULL;
                     next_task->context.uc_stack.ss_size = 0;
@@ -222,20 +206,6 @@ unsigned int systime() {
 
 void ppos_init () {
     setvbuf(stdout, 0, _IONBF, 0);
-
-    /* Inicializa o contexto da main */
-    getcontext(&main_task.context);
-    current_task = &main_task;
-    main_task.id = MAIN_ID;
-    main_task.type = USER_TASK;
-    main_task.activations++;
-
-    /* Inicializa as filas */
-    ready_queue = NULL;
-    suspended_queue = NULL;
-
-    queue_append(&ready_queue, (queue_t *) &main_task);
-
     /* seta o clock do sistema pra 0 */
     clock = 0;
 
@@ -258,14 +228,36 @@ void ppos_init () {
         perror("WARNING [ppos_init] Erro em itimer: ");
     }
 
-    /* Inicializa a tarefa dispatcher */
-    #ifdef DEBUG
-        printf("[dispatcher_body] Tarefa dispatcher criada\n");
-    #endif
+    /* Inicializa o contexto da main */
+    main_task.start_time = systime();
+    getcontext(&main_task.context);
+    current_task = &main_task;
+    main_task.id = MAIN_ID;
+    main_task.type = USER_TASK;
+    main_task.activations++;
+    main_task.status = PRONTA;
+    task_setprio(&main_task, DEFAULT_PRIO);
+    main_task.quantum = QUANTUM;
+    main_task.processor_time = 0;
+    main_task.tasks_waiting_for_conclusion = NULL;
+    current_task = &main_task;
+
+    /* Inicializa as filas */
+    ready_queue = NULL;
+    suspended_queue = NULL;
+
+    queue_append(&ready_queue, (queue_t *) &main_task);
+
 
     /* Inicializa a tarefa dispatcher */
     task_init(&dispatcher_task, (void *) dispatcher_body, NULL);
     dispatcher_task.type = SYSTEM_TASK;
+    dispatcher_task.id = DISPATCHER_ID;
+
+    #ifdef DEBUG
+        printf("[dispatcher_body] Tarefa dispatcher criada\n");
+    #endif
+    
 
     #ifdef DEBUG
         printf("[ppos_init] PPos iniciado\n");
@@ -359,13 +351,14 @@ void task_exit(int exit_code) {
      current_task->processor_time,\
      current_task->activations);
 
+    current_task->status = TERMINADA;
+    task_count--;
     /* se a tarefa que está encerrando é o dispatcher */
     switch (task_id()) {
         case MAIN_ID: // tarefa Main
             #ifdef DEBUG
                 printf("[task_exit] Tarefa Main encerrada\n");
             #endif
-            current_task->status = TERMINADA;
             task_switch(&dispatcher_task);
             break;
         case DISPATCHER_ID: // tarefa Dispatcher
@@ -378,9 +371,17 @@ void task_exit(int exit_code) {
             /* retorna para a tarefa principal */
             #ifdef DEBUG
                 printf("[task_exit] Tarefa %d encerrada\n", task_id());
+                printf("[task_exit] Restam %d tarefas\n", task_count);
             #endif
-            task_count--;
-            current_task->status = TERMINADA;
+
+            /* acorda as tarefas esperando a conclusão da tarefa */
+            task_t *task_waiting = (task_t *) current_task->tasks_waiting_for_conclusion;
+            #ifdef DEBUG
+                printf("[task_exit] Acordando %d tarefas esperando a conclusão da tarefa %d\n", queue_size(current_task->tasks_waiting_for_conclusion) , task_id());
+            #endif
+            while (queue_size(current_task->tasks_waiting_for_conclusion) > 0) {
+                task_awake(task_waiting, (task_t **) &current_task->tasks_waiting_for_conclusion);
+            }
             task_switch(&dispatcher_task);
             break;
     }
@@ -481,16 +482,17 @@ void task_awake(task_t* task, task_t **queue) {
         return;
     }
 
-    /* remove a tarefa da fila de suspensas, muda seu stauts e insere na fila de prontas*/
-    if (task->status == SUSPENSA) {
-        #ifdef DEBUG
-            printf("[task_awake] Tarefa %d acordada\n", task->id);
-        #endif
-
-        task->status = PRONTA;
-        queue_remove((queue_t **) queue, (queue_t *) task);
-        queue_append((queue_t **) &ready_queue, (queue_t *) task);
-    }
+    task->status = PRONTA;
+    /* remove a tarefa da fila de suspensas e insere na fila de prontas */
+    queue_remove((queue_t **) queue, (queue_t *) task);
+    queue_append(&ready_queue, (queue_t *) task);
+    #ifdef DEBUG
+        printf("[task_awake] Tarefa %d acordada\n", task->id);
+    #endif
+    
+    #ifdef DEBUG
+        printf("[task_awake] Tarefa %d adicionada na fila de prontas\n", task->id);
+    #endif
 
     return;
 }
@@ -506,7 +508,7 @@ int task_wait(task_t *task) {
     #endif
 
     current_task->status = SUSPENSA;
-    queue_append((queue_t **)task->tasks_waiting_for_conclusion, (queue_t *) current_task);
+    queue_append(&task->tasks_waiting_for_conclusion, (queue_t *) current_task);
     task_switch(&dispatcher_task);
 
     return task->exit_code;
