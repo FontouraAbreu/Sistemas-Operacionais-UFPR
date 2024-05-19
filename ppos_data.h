@@ -20,8 +20,8 @@ typedef struct task_t
 {
   struct task_t *prev, *next ;		// ponteiros para usar em filas
   struct queue_t *tasks_waiting_for_conclusion; // ponteiro para a fila de tarefas esperando a conclusao da tarefa
-  int id ;				// identificador da tarefa
-  ucontext_t context ;			// contexto armazenado da tarefa
+  int id ;				    // identificador da tarefa
+  ucontext_t context ;// contexto armazenado da tarefa
   short status ;			// pronta, rodando, suspensa, ...
   int prio_e;        // prioridade estatica da tarefa
   int prio_d;        // prioridade dinamica da tarefa
@@ -32,6 +32,7 @@ typedef struct task_t
   unsigned int end_time; // tempo de termino da tarefa
   unsigned int processor_time; // tempo de processamento da tarefa
   int exit_code; // codigo de saida da tarefa
+  unsigned int wake_up_time; // tempo de acordar da tarefa
   // ... (outros campos serão adicionados mais tarde)
 } task_t ;
 

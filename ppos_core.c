@@ -14,6 +14,7 @@
 #define RODANDO 1
 #define SUSPENSA 2
 #define TERMINADA 3
+#define DORMINDO 4
 
 /* IDS DA MAIN E DISPATCHER */
 #define DISPATCHER_ID 1
@@ -41,7 +42,7 @@
 
 task_t *current_task, main_task, dispatcher_task; // tarefas atual, principal e dispatcher
 int task_count = 1; // contador de tarefas deve começar em 1
-queue_t *ready_queue, *suspended_queue; // filas de prontas e suspensas
+queue_t *ready_queue, *sleeping_queue; // filas de prontas e dormindo
 
 unsigned int clock; // clock do sistema
 
@@ -130,7 +131,26 @@ void dispatcher_body(void *arg) {
     unsigned int current_task_end_time = 0;
 
     // enquanto houverem tarefas de usuário
-    while (queue_size(ready_queue) > 0) {
+    while (queue_size(ready_queue) > 0 || queue_size(sleeping_queue) > 0) {
+        
+        // percorre a fila de tarefas dormindo e acorda apenas as que já podem acordar
+        task_t *loop_current_task = (task_t *) sleeping_queue;
+        for (int i = queue_size(sleeping_queue); i > 0; i--) {
+            task_t *next_task = (task_t *) loop_current_task->next;
+            if (next_task->wake_up_time <= systime()) {
+                #ifdef DEBUG
+                    printf("[dispatcher_body] Acordando tarefa %d\n", next_task->id);
+                #endif
+                task_awake(next_task, (task_t **) &sleeping_queue);
+                continue;
+            }
+            loop_current_task = next_task;
+        }
+
+        /* se a fila de prontas estiver vazia, continua */
+        if (queue_size(ready_queue) == 0) {
+            continue;
+        }
         // escolhe a próxima tarefa a executar
         #ifdef DEBUG
             printf("[dispatcher_body] Fila de prontas com %d tarefas\n", queue_size(ready_queue));
@@ -168,7 +188,6 @@ void dispatcher_body(void *arg) {
                     break;
                 // se a tarefa foi suspensa, a coloca na fila de suspensas
                 case SUSPENSA: // 2
-                    // queue_append(&suspended_queue, (queue_t *) next_task);
                     break;
                 // se a tarefa foi encerrada, a remove da fila de prontas
                 case TERMINADA: // 3
@@ -244,7 +263,7 @@ void ppos_init () {
 
     /* Inicializa as filas */
     ready_queue = NULL;
-    suspended_queue = NULL;
+    sleeping_queue = NULL;
 
     queue_append(&ready_queue, (queue_t *) &main_task);
 
@@ -292,6 +311,7 @@ int task_init(task_t *task, void (*start_func)(void *), void *arg) {
     task->activations = 0; // numero de ativacoes da tarefa
     task->start_time = systime(); // tempo de inicio da tarefa
     task->processor_time = 0; // tempo de processamento da tarefa
+    task->wake_up_time = 0; // tempo de acordar da tarefa
 
     /* Adiciona a task na fila de prontas */
     queue_append(&ready_queue, (queue_t *) task);
@@ -457,15 +477,13 @@ void task_suspend (task_t **queue) {
     }
 
     /* se a tarefa estiver rodando, muda seu status e insere na fila suspensa */
-    if (current_task->id == RODANDO) {
-        #ifdef DEBUG
-            printf("[task_suspend] Tarefa %d suspensa\n", current_task->id);
-        #endif
-
-        current_task->status = SUSPENSA;
-        queue_append((queue_t **) queue, (queue_t *) current_task);
+    #ifdef DEBUG
+        printf("[task_suspend] Tarefa %d suspensa\n", current_task->id);
+    #endif
+    if (current_task->id == MAIN_ID && queue_size(ready_queue) > 0) {
+        queue_remove((queue_t **) &ready_queue, (queue_t *) current_task);
     }
-
+    queue_append((queue_t **) queue, (queue_t *) current_task);
     task_switch(&dispatcher_task);
     
     return;
@@ -482,15 +500,12 @@ void task_awake(task_t* task, task_t **queue) {
         return;
     }
 
-    task->status = PRONTA;
     /* remove a tarefa da fila de suspensas e insere na fila de prontas */
+    task->status = PRONTA;
     queue_remove((queue_t **) queue, (queue_t *) task);
-    queue_append(&ready_queue, (queue_t *) task);
+    queue_append((queue_t **) &ready_queue, (queue_t *) task);
     #ifdef DEBUG
-        printf("[task_awake] Tarefa %d acordada\n", task->id);
-    #endif
-    
-    #ifdef DEBUG
+        printf("[task_awake] Tarefa %d acordada em %d\n", task->id, systime());
         printf("[task_awake] Tarefa %d adicionada na fila de prontas\n", task->id);
     #endif
 
@@ -499,17 +514,37 @@ void task_awake(task_t* task, task_t **queue) {
 
 int task_wait(task_t *task) {
     if (task == NULL) {
-        perror("WARNING [task_wait] Tarefa nula: ");
         return -1;
+    }
+
+    if (task->status == TERMINADA) {
+        return task->exit_code;
     }
 
     #ifdef DEBUG
         printf("[task_wait] Tarefa %d esperando a conclusão da tarefa %d\n", current_task->id, task->id);
     #endif
-
+    
     current_task->status = SUSPENSA;
-    queue_append(&task->tasks_waiting_for_conclusion, (queue_t *) current_task);
-    task_switch(&dispatcher_task);
+    task_suspend((task_t **) &task->tasks_waiting_for_conclusion);
+
 
     return task->exit_code;
+}
+
+void task_sleep(int t) {
+    if (t < 0) {
+        perror("WARNING [task_sleep] Tempo inválido: ");
+        return;
+    }
+
+    current_task->status = DORMINDO;
+    current_task->wake_up_time = systime() + t;
+    #ifdef DEBUG
+        printf("[task_sleep] Tarefa %d dormindo por %d ms\n", current_task->id, t);
+        printf("[task_sleep] Acordará em %d ms\n", current_task->wake_up_time);
+    #endif
+    task_suspend((task_t **) &sleeping_queue);
+
+    // task_switch(&dispatcher_task);
 }
