@@ -281,6 +281,7 @@ void ppos_init () {
     #ifdef DEBUG
         printf("[ppos_init] PPos iniciado\n");
     #endif
+    task_switch(&dispatcher_task);
 }
 
 int task_init(task_t *task, void (*start_func)(void *), void *arg) {
@@ -379,6 +380,7 @@ void task_exit(int exit_code) {
             #ifdef DEBUG
                 printf("[task_exit] Tarefa Main encerrada\n");
             #endif
+            current_task->status = TERMINADA;
             task_switch(&dispatcher_task);
             break;
         case DISPATCHER_ID: // tarefa Dispatcher
@@ -480,7 +482,7 @@ void task_suspend (task_t **queue) {
     #ifdef DEBUG
         printf("[task_suspend] Tarefa %d suspensa\n", current_task->id);
     #endif
-    if (current_task->id == MAIN_ID && queue_size(ready_queue) > 0) {
+    if (current_task->id == MAIN_ID && queue_size(ready_queue) > 0 && current_task->status == RODANDO) {
         queue_remove((queue_t **) &ready_queue, (queue_t *) current_task);
     }
     queue_append((queue_t **) queue, (queue_t *) current_task);
