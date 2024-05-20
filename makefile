@@ -2,7 +2,7 @@
 CFLAGS = -Wall -g -std=gnu99
 LFLAGS = -lpthread -lm
 CC = gcc
-TEST_FILE = pingpong-wait.c
+TEST_FILE = pingpong-racecond.c
 # regras de ligação
 all: ppos
 
@@ -23,10 +23,10 @@ test.o: $(TEST_FILE) queue.o ppos_core.o
 
 # regra para limpar os diretórios
 run: ppos
-	./ppos
+	./ppos_core
 
 clean:
-	rm -f *.o ppos
+	rm -f *.o ppos_core
 
 purge: clean
-	rm -f ppos
+	rm -f ppos_core
