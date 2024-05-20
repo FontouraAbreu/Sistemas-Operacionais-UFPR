@@ -33,13 +33,14 @@ typedef struct task_t
   unsigned int processor_time; // tempo de processamento da tarefa
   int exit_code; // codigo de saida da tarefa
   unsigned int wake_up_time; // tempo de acordar da tarefa
-  // ... (outros campos serão adicionados mais tarde)
 } task_t ;
 
 // estrutura que define um semáforo
 typedef struct
 {
-  // preencher quando necessário
+  int counter; // contador do semáforo
+  queue_t *queue; // fila de tarefas bloqueadas no semáforo
+  int lock; // lock do semáforo
 } semaphore_t ;
 
 // estrutura que define um mutex
