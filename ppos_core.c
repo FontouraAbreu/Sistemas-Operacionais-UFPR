@@ -34,7 +34,7 @@
 #define CLOCK_INITIAL_VALUE_US 1000 // 1ms
 #define CLOCK_INTERVAL_VALUE_S 0
 #define CLOCK_INTERVAL_VALUE_US 1000 // 1ms
-#define QUANTUM 10
+#define QUANTUM 5
 
 
 // #define DEBUG
@@ -49,6 +49,31 @@ unsigned int clock; // clock do sistema
 
 struct sigaction action;
 struct itimerval timer;
+
+/* TIME HANDLER */
+/* -------------------------------------------------------------------------- */
+
+void tick_handler(int signum) {
+    clock++;
+
+    /* se a tarefa atual for o dispatcher, retorna */
+    if (current_task->type == SYSTEM_TASK || --current_task->quantum > 0) 
+        return;
+
+    /* decrementa o quantum da tarefa atual */
+    task_yield();
+}
+
+unsigned int systime() {
+    return clock;
+}
+
+/* TIME HANDLER */
+/* -------------------------------------------------------------------------- */
+
+
+/* CORE */
+/* -------------------------------------------------------------------------- */
 
 task_t *scheduler() {
     // se a fila de prontas estiver vazia, retorna nulo
@@ -208,20 +233,8 @@ void dispatcher_body(void *arg) {
     task_exit(0);
 }
 
-void tick_handler(int signum) {
-    clock++;
-
-    /* se a tarefa atual for o dispatcher, retorna */
-    if (current_task->type == SYSTEM_TASK || --current_task->quantum > 0) 
-        return;
-
-    /* decrementa o quantum da tarefa atual */
-    task_yield();
-}
-
-unsigned int systime() {
-    return clock;
-}
+/* CORE */
+/* -------------------------------------------------------------------------- */
 
 void ppos_init () {
     setvbuf(stdout, 0, _IONBF, 0);
@@ -283,6 +296,10 @@ void ppos_init () {
     #endif
     task_switch(&dispatcher_task);
 }
+
+
+/* TASK HANDLING */
+/* -------------------------------------------------------------------------- */
 
 int task_init(task_t *task, void (*start_func)(void *), void *arg) {
     /* Inicializa o contexto da task */
@@ -409,15 +426,6 @@ void task_exit(int exit_code) {
     }
 }
 
-int task_id (){
-    /* se a tarefa for nula, imprime erro */
-    if (!current_task){
-        perror("WARNING [task_id] Tarefa nula: ");
-        return -1;
-    }
-    return current_task->id;
-}
-
 void task_yield() {
     /* se a tarefa for nula, imprime erro */
     if (!current_task){
@@ -428,6 +436,21 @@ void task_yield() {
     current_task->status = PRONTA;
     task_switch(&dispatcher_task);
 }
+
+int task_id (){
+    /* se a tarefa for nula, imprime erro */
+    if (!current_task){
+        perror("WARNING [task_id] Tarefa nula: ");
+        return -1;
+    }
+    return current_task->id;
+}
+
+/* TASK HANDLING */
+/* -------------------------------------------------------------------------- */
+
+/* TASK PRIORITIES */
+/* -------------------------------------------------------------------------- */
 
 void task_setprio(task_t *task, int prio) {
     /* verificando limites */ 
@@ -466,6 +489,14 @@ int task_getprio(task_t *task) {
 
     return task->prio_e;
 }
+
+/* TASK PRIORITIES */
+/* -------------------------------------------------------------------------- */
+
+
+
+/* TASK SUSPENSION */
+/* -------------------------------------------------------------------------- */
 
 void task_suspend (task_t **queue) {
     if (queue == NULL) {
@@ -548,5 +579,92 @@ void task_sleep(int t) {
     #endif
     task_suspend((task_t **) &sleeping_queue);
 
-    // task_switch(&dispatcher_task);
 }
+
+/* TASK SUSPENSION */
+/* -------------------------------------------------------------------------- */
+
+/* SEMAPHORE */
+/* -------------------------------------------------------------------------- */
+
+void enter_cs(int *lock) {
+    while (__sync_fetch_and_or(lock, 1));
+}
+
+void leave_cs(int *lock) {
+    (*lock) = 0;
+}
+
+int sem_init(semaphore_t *s, int value) {
+
+    enter_cs(&s->lock);
+
+    if (s == NULL) {
+        perror("WARNING [sem_init] Semáforo nulo: ");
+        return -1;
+    }
+
+    s->counter = value;
+    s->queue = NULL;
+
+    leave_cs(&s->lock);
+
+    return 0;
+}
+
+int sem_down(semaphore_t *s) {
+
+    enter_cs(&s->lock);
+    if (s == NULL) {
+        perror("WARNING [sem_down] Semáforo nulo: ");
+        return -1;
+    }
+
+    s->counter--;
+
+    if (s->counter < 0) {
+        task_suspend((task_t **) &s->queue);
+    }
+    leave_cs(&s->lock);
+
+    return 0;
+}
+
+int sem_up(semaphore_t *s) {
+    if (s == NULL) {
+        perror("WARNING [sem_up] Semáforo nulo: ");
+        return -1;
+    }
+
+    s->counter++;
+
+    if (s->counter <= 0) {
+        task_awake((task_t *) s->queue, (task_t **) &s->queue);
+    }
+
+    return 0;
+}
+
+int sem_destroy(semaphore_t *s) {
+    if (s == NULL) {
+        perror("WARNING [sem_destroy] Semáforo nulo: ");
+        return -1;
+    }
+
+    while (queue_size(s->queue) > 0) {
+        /* change task exit code */
+        task_t *task = (task_t *) s->queue;
+        task->exit_code = -1;
+        task_awake((task_t *) s->queue, (task_t **) &s->queue);
+    }
+
+    s->counter = 0;
+    s->queue = NULL;
+    s = NULL;
+
+    return 0;
+}
+
+
+/* SEMAPHORE */
+/* -------------------------------------------------------------------------- */
