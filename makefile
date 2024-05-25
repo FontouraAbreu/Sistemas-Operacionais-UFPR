@@ -2,7 +2,7 @@
 CFLAGS = -Wall -g -std=gnu99
 LFLAGS = -lpthread -lm
 CC = gcc
-TEST_FILE = pingpong-racecond.c
+TEST_FILE = pingpong-mqueue.c
 # regras de ligação
 all: ppos
 
