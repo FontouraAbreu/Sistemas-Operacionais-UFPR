@@ -697,10 +697,6 @@ int mqueue_send(mqueue_t* queue, void *msg) {
         return -1;
     }
 
-    if (queue_size((queue_t *) queue) == queue->max_msgs) {
-        task_suspend((task_t **) &queue);
-    }
-
     sem_down(queue->s_vaga);
     sem_down(queue->s_buffer);
 
@@ -722,21 +718,47 @@ int mqueue_recv(mqueue_t *queue, void *msg) {
         return -1;
     }
 
-    if (queue_size((queue_t *) queue) == 0) {
-        task_suspend((task_t **) &queue);
-    }
-
     sem_down(queue->s_item);
     sem_down(queue->s_buffer);
 
-    void *resized_msg = (void *) queue->msg_size;
-    memcpy(msg, resized_msg, queue->msg_size);
+    void *new_msg = (void *) queue_remove((queue_t **) &queue, (queue_t *) queue);
+    memcpy(msg, new_msg, queue->msg_size);
 
     sem_up(queue->s_buffer);
     sem_up(queue->s_vaga);
 
     return 0;
 }
+
+int mqueue_destroy(mqueue_t *queue) {
+    if (queue == NULL) {
+        perror("WARNING [mqueue_destroy] Fila de mensagens nula: ");
+        return -1;
+    }
+
+    /* libera a memória de todas as mensagens da fila */
+    while (queue_size((queue_t *) queue) > 0) {
+        void *msg = (void *) queue;
+        free(msg);
+    }
+
+    sem_destroy(queue->s_buffer);
+    sem_destroy(queue->s_vaga);
+
+    queue = NULL;
+
+    return 0;
+}
+
+int mqueue_msgs(mqueue_t *queue) {
+    if (queue == NULL) {
+        perror("WARNING [mqueue_msgs] Fila de mensagens nula: ");
+        return -1;
+    }
+
+    return queue_size((queue_t *) queue);
+}
+
 
 /* MESSAGE */
 /* -------------------------------------------------------------------------- */
