@@ -668,3 +668,75 @@ int sem_destroy(semaphore_t *s) {
 
 /* SEMAPHORE */
 /* -------------------------------------------------------------------------- */
+
+/* MESSAGE */
+/* -------------------------------------------------------------------------- */
+
+int mqueue_init(mqueue_t *queue, int max_msgs, int msg_size) {
+    if (queue == NULL) {
+        perror("WARNING [mqueue_init] Fila de mensagens nula: ");
+        return -1;
+    }
+
+    queue->max_msgs = max_msgs;
+    queue->msg_size = msg_size;
+
+
+    queue->s_buffer = (semaphore_t *) malloc(sizeof(semaphore_t));
+    queue->s_vaga = (semaphore_t *) malloc(sizeof(semaphore_t));
+
+    sem_init(queue->s_buffer, 1);
+    sem_init(queue->s_vaga, max_msgs);
+
+    return 0;
+}
+
+int mqueue_send(mqueue_t* queue, void *msg) {
+    if (queue == NULL) {
+        perror("WARNING [mqueue_send] Fila de mensagens nula: ");
+        return -1;
+    }
+
+    if (queue_size((queue_t *) queue) == queue->max_msgs) {
+        task_suspend((task_t **) &queue);
+    }
+
+    sem_down(queue->s_vaga);
+    sem_down(queue->s_buffer);
+
+    void *resized_msg = malloc(queue->msg_size);
+    memcpy(resized_msg, msg, queue->msg_size);
+
+    queue_append((queue_t **) &queue, (queue_t *) resized_msg);
+
+    sem_up(queue->s_buffer);
+
+    sem_up(queue->s_item);
+
+    return 0;
+}
+
+int mqueue_recv(mqueue_t *queue, void *msg) {
+    if (queue == NULL) {
+        perror("WARNING [mqueue_recv] Fila de mensagens nula: ");
+        return -1;
+    }
+
+    if (queue_size((queue_t *) queue) == 0) {
+        task_suspend((task_t **) &queue);
+    }
+
+    sem_down(queue->s_item);
+    sem_down(queue->s_buffer);
+
+    void *resized_msg = (void *) queue->msg_size;
+    memcpy(msg, resized_msg, queue->msg_size);
+
+    sem_up(queue->s_buffer);
+    sem_up(queue->s_vaga);
+
+    return 0;
+}
+
+/* MESSAGE */
+/* -------------------------------------------------------------------------- */
