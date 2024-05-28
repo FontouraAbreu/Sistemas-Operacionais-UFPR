@@ -34,7 +34,7 @@
 #define CLOCK_INITIAL_VALUE_US 1000 // 1ms
 #define CLOCK_INTERVAL_VALUE_S 0
 #define CLOCK_INTERVAL_VALUE_US 1000 // 1ms
-#define QUANTUM 5
+#define QUANTUM 20
 
 
 // #define DEBUG
@@ -588,26 +588,34 @@ void task_sleep(int t) {
 /* -------------------------------------------------------------------------- */
 
 void enter_cs(int *lock) {
+    #ifdef DEBUG
+        printf("[enter_cs] Tentando entrar na seção crítica\n");
+    #endif
     while (__sync_fetch_and_or(lock, 1));
 }
 
 void leave_cs(int *lock) {
+    #ifdef DEBUG
+        printf("[leave_cs] Saindo da seção crítica\n");
+    #endif
     (*lock) = 0;
 }
 
 int sem_init(semaphore_t *s, int value) {
-
-    enter_cs(&s->lock);
-
     if (s == NULL) {
         perror("WARNING [sem_init] Semáforo nulo: ");
         return -1;
     }
 
+
     s->counter = value;
     s->queue = NULL;
+    s->lock = 0;
+    
+    #ifdef DEBUG
+        printf("[sem_init] Inicializando semáforo com valor %d\n", value);
+    #endif
 
-    leave_cs(&s->lock);
 
     return 0;
 }
@@ -622,7 +630,14 @@ int sem_down(semaphore_t *s) {
 
     s->counter--;
 
+    #ifdef DEBUG
+        printf("[sem_down] Task: %d. Decrementando semáforo para %d\n", task_id(), s->counter);
+    #endif
+
     if (s->counter < 0) {
+        #ifdef DEBUG
+            printf("[sem_down] Tarefa %d bloqueada\n", task_id());
+        #endif
         task_suspend((task_t **) &s->queue);
     }
     leave_cs(&s->lock);
@@ -631,16 +646,24 @@ int sem_down(semaphore_t *s) {
 }
 
 int sem_up(semaphore_t *s) {
+    enter_cs(&s->lock);
     if (s == NULL) {
         perror("WARNING [sem_up] Semáforo nulo: ");
         return -1;
     }
 
     s->counter++;
+    #ifdef DEBUG
+        printf("[sem_up] Incrementando semáforo para %d\n", s->counter);
+    #endif
 
     if (s->counter <= 0) {
+        #ifdef DEBUG
+            printf("[sem_up] Tarefa %d acordada\n", ((task_t *) s->queue)->id);
+        #endif
         task_awake((task_t *) s->queue, (task_t **) &s->queue);
     }
+    leave_cs(&s->lock);
 
     return 0;
 }
@@ -652,6 +675,7 @@ int sem_destroy(semaphore_t *s) {
     }
 
     while (queue_size(s->queue) > 0) {
+
         /* change task exit code */
         task_t *task = (task_t *) s->queue;
         task->exit_code = -1;
@@ -678,15 +702,23 @@ int mqueue_init(mqueue_t *queue, int max_msgs, int msg_size) {
         return -1;
     }
 
+    queue->buffer = malloc(max_msgs * msg_size);
+    if (queue->buffer == NULL) {
+        perror("WARNING [mqueue_init] Erro na alocação do buffer: ");
+        return -1;
+    }
+
     queue->max_msgs = max_msgs;
     queue->msg_size = msg_size;
+    queue->buffer_top = 0;
 
+    sem_init(&queue->s_buffer, 1);
+    sem_init(&queue->s_vaga, max_msgs);
+    sem_init(&queue->s_item, 0);
 
-    queue->s_buffer = (semaphore_t *) malloc(sizeof(semaphore_t));
-    queue->s_vaga = (semaphore_t *) malloc(sizeof(semaphore_t));
-
-    sem_init(queue->s_buffer, 1);
-    sem_init(queue->s_vaga, max_msgs);
+    #ifdef DEBUG
+        printf("[mqueue_init] Fila de mensagens inicializada com %d mensagens de tamanho %d\n", max_msgs, msg_size);
+    #endif
 
     return 0;
 }
@@ -697,17 +729,18 @@ int mqueue_send(mqueue_t* queue, void *msg) {
         return -1;
     }
 
-    sem_down(queue->s_vaga);
-    sem_down(queue->s_buffer);
 
-    void *resized_msg = malloc(queue->msg_size);
-    memcpy(resized_msg, msg, queue->msg_size);
+    sem_down(&queue->s_vaga);
+    sem_down(&queue->s_buffer);
 
-    queue_append((queue_t **) &queue, (queue_t *) resized_msg);
 
-    sem_up(queue->s_buffer);
+    int offset = queue->buffer_top * queue->msg_size;
+    memcpy((void *) (queue->buffer + offset), msg, queue->msg_size);
+    queue->buffer_top++;
 
-    sem_up(queue->s_item);
+    sem_up(&queue->s_buffer);
+
+    sem_up(&queue->s_item);
 
     return 0;
 }
@@ -718,14 +751,24 @@ int mqueue_recv(mqueue_t *queue, void *msg) {
         return -1;
     }
 
-    sem_down(queue->s_item);
-    sem_down(queue->s_buffer);
 
-    void *new_msg = (void *) queue_remove((queue_t **) &queue, (queue_t *) queue);
-    memcpy(msg, new_msg, queue->msg_size);
+    sem_down(&queue->s_item);
+    sem_down(&queue->s_buffer);
 
-    sem_up(queue->s_buffer);
-    sem_up(queue->s_vaga);
+
+    memcpy(msg, (void *) queue->buffer, queue->msg_size);
+
+    /* move todas as mensagens uma posição para trás */
+    for (int i = 0; i < queue->buffer_top; i++) {
+        int offset = i * queue->msg_size;
+        memcpy((void *) queue->buffer + offset, (void *) queue->buffer + offset + queue->msg_size, queue->msg_size);
+    }
+    queue->buffer_top--;
+
+
+    sem_up(&queue->s_buffer);
+    sem_up(&queue->s_vaga);
+
 
     return 0;
 }
@@ -736,15 +779,16 @@ int mqueue_destroy(mqueue_t *queue) {
         return -1;
     }
 
-    /* libera a memória de todas as mensagens da fila */
-    while (queue_size((queue_t *) queue) > 0) {
-        void *msg = (void *) queue;
-        free(msg);
-    }
+    sem_destroy(&queue->s_vaga);
+    sem_destroy(&queue->s_item);
+    sem_destroy(&queue->s_buffer);
 
-    sem_destroy(queue->s_buffer);
-    sem_destroy(queue->s_vaga);
+    free(queue->buffer);
 
+    queue->buffer = NULL;
+    queue->max_msgs = 0;
+    queue->msg_size = 0;
+    queue->buffer_top = 0;
     queue = NULL;
 
     return 0;
@@ -756,7 +800,7 @@ int mqueue_msgs(mqueue_t *queue) {
         return -1;
     }
 
-    return queue_size((queue_t *) queue);
+    return queue->buffer_top;
 }
 
 

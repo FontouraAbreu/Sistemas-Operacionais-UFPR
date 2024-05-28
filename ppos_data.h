@@ -61,9 +61,11 @@ typedef struct
 {
   int max_msgs; // capacidade da fila
   int msg_size; // tamanho de cada mensagem
-  semaphore_t *s_buffer; // semáforo do buffer
-  semaphore_t *s_vaga; // semáforo da vaga
-  semaphore_t *s_item; // semáforo do item
+  semaphore_t s_buffer; // semáforo do buffer
+  semaphore_t s_vaga; // semáforo da vaga
+  semaphore_t s_item; // semáforo do item
+  void *buffer; // ponteiro para o buffer
+  int buffer_top; // topo do buffer
 } mqueue_t ;
 
 #endif
