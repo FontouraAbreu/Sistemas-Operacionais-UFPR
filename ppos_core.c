@@ -42,6 +42,7 @@
 
 task_t *current_task, main_task, dispatcher_task; // tarefas atual, principal e dispatcher
 int task_count = 1; // contador de tarefas deve começar em 1
+int user_tasks = 0; // contador de tarefas de usuário
 queue_t *ready_queue, *sleeping_queue; // filas de prontas e dormindo
 
 unsigned int clock; // clock do sistema
@@ -156,7 +157,7 @@ void dispatcher_body(void *arg) {
     unsigned int current_task_end_time = 0;
 
     // enquanto houverem tarefas de usuário
-    while (queue_size(ready_queue) > 0 || queue_size(sleeping_queue) > 0) {
+    while (user_tasks > 0) {
         
         // percorre a fila de tarefas dormindo e acorda apenas as que já podem acordar
         task_t *loop_current_task = (task_t *) sleeping_queue;
@@ -333,6 +334,7 @@ int task_init(task_t *task, void (*start_func)(void *), void *arg) {
 
     /* Adiciona a task na fila de prontas */
     queue_append(&ready_queue, (queue_t *) task);
+    user_tasks++;
 
     /* inicializa a fila de tarefas esperando a conclusão da tarefa */
     task->tasks_waiting_for_conclusion = NULL;
@@ -629,6 +631,7 @@ int sem_down(semaphore_t *s) {
     }
 
     s->counter--;
+    leave_cs(&s->lock);
 
     #ifdef DEBUG
         printf("[sem_down] Task: %d. Decrementando semáforo para %d\n", task_id(), s->counter);
@@ -640,7 +643,6 @@ int sem_down(semaphore_t *s) {
         #endif
         task_suspend((task_t **) &s->queue);
     }
-    leave_cs(&s->lock);
 
     return 0;
 }
@@ -653,6 +655,7 @@ int sem_up(semaphore_t *s) {
     }
 
     s->counter++;
+    leave_cs(&s->lock);
     #ifdef DEBUG
         printf("[sem_up] Incrementando semáforo para %d\n", s->counter);
     #endif
@@ -663,7 +666,6 @@ int sem_up(semaphore_t *s) {
         #endif
         task_awake((task_t *) s->queue, (task_t **) &s->queue);
     }
-    leave_cs(&s->lock);
 
     return 0;
 }
@@ -751,9 +753,25 @@ int mqueue_recv(mqueue_t *queue, void *msg) {
         return -1;
     }
 
+    #ifdef DEBUG
+        printf("[mqueue_recv] Fila de mensagens com %d mensagens\n", queue->buffer_top);
+        printf("[mqueue_recv] Recebendo mensagem\n");
+        printf("[mqueue_recv] Tentando bloquear a fila de mensagens\n");
+    #endif
+
 
     sem_down(&queue->s_item);
+
+    #ifdef DEBUG
+        printf("[mqueue_recv] Fila de mensagens bloqueada\n");
+        printf("[mqueue_recv] Tenta bloquear a vaga\n");
+    #endif
+
     sem_down(&queue->s_buffer);
+
+    #ifdef DEBUG
+        printf("[mqueue_recv] Vaga bloqueada\n");
+    #endif
 
 
     memcpy(msg, (void *) queue->buffer, queue->msg_size);
@@ -765,6 +783,11 @@ int mqueue_recv(mqueue_t *queue, void *msg) {
     }
     queue->buffer_top--;
 
+
+    #ifdef DEBUG
+        printf("[mqueue_recv] Mensagem recebida\n");
+        printf("[mqueue_recv] Desbloqueando fila de mensagens e vaga\n");
+    #endif
 
     sem_up(&queue->s_buffer);
     sem_up(&queue->s_vaga);
