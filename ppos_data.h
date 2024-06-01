@@ -42,6 +42,7 @@ typedef struct
   int counter; // contador do semáforo
   queue_t *queue; // fila de tarefas bloqueadas no semáforo
   int lock; // lock do semáforo
+  short valid; // semáforo valido
 } semaphore_t ;
 
 // estrutura que define um mutex
@@ -66,6 +67,7 @@ typedef struct
   semaphore_t s_item; // semáforo do item
   void *buffer; // ponteiro para o buffer
   int buffer_top; // topo do buffer
+  short valid; // fila de mensagens valida
 } mqueue_t ;
 
 #endif

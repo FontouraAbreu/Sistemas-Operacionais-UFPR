@@ -37,7 +37,7 @@
 #define QUANTUM 20
 
 
-// #define DEBUG
+#define DEBUG
 #define STACKSIZE 64*1024	/* tamanho de pilha das threads */
 
 task_t *current_task, main_task, dispatcher_task; // tarefas atual, principal e dispatcher
@@ -260,6 +260,9 @@ void ppos_init () {
     if (setitimer(ITIMER_REAL, &timer, 0) < 0) {
         perror("WARNING [ppos_init] Erro em itimer: ");
     }
+    /* Inicializa as filas */
+    ready_queue = NULL;
+    sleeping_queue = NULL;
 
     /* Inicializa o contexto da main */
     main_task.start_time = systime();
@@ -273,13 +276,9 @@ void ppos_init () {
     main_task.quantum = QUANTUM;
     main_task.processor_time = 0;
     main_task.tasks_waiting_for_conclusion = NULL;
-    current_task = &main_task;
-
-    /* Inicializa as filas */
-    ready_queue = NULL;
-    sleeping_queue = NULL;
-
+    
     queue_append(&ready_queue, (queue_t *) &main_task);
+    current_task = &main_task;
 
 
     /* Inicializa a tarefa dispatcher */
@@ -399,7 +398,7 @@ void task_exit(int exit_code) {
             #ifdef DEBUG
                 printf("[task_exit] Tarefa Main encerrada\n");
             #endif
-            current_task->status = TERMINADA;
+            queue_remove((queue_t **) &ready_queue, (queue_t *) &main_task);
             task_switch(&dispatcher_task);
             break;
         case DISPATCHER_ID: // tarefa Dispatcher
@@ -613,6 +612,7 @@ int sem_init(semaphore_t *s, int value) {
     s->counter = value;
     s->queue = NULL;
     s->lock = 0;
+    s->valid = 1;
     
     #ifdef DEBUG
         printf("[sem_init] Inicializando semáforo com valor %d\n", value);
@@ -624,12 +624,12 @@ int sem_init(semaphore_t *s, int value) {
 
 int sem_down(semaphore_t *s) {
 
-    enter_cs(&s->lock);
-    if (s == NULL) {
+    if (s == NULL || s->valid == 0) {
         perror("WARNING [sem_down] Semáforo nulo: ");
         return -1;
     }
 
+    enter_cs(&s->lock);
     s->counter--;
     leave_cs(&s->lock);
 
@@ -648,12 +648,12 @@ int sem_down(semaphore_t *s) {
 }
 
 int sem_up(semaphore_t *s) {
-    enter_cs(&s->lock);
-    if (s == NULL) {
+    if (s == NULL || s->valid == 0) {
         perror("WARNING [sem_up] Semáforo nulo: ");
         return -1;
     }
 
+    enter_cs(&s->lock);
     s->counter++;
     leave_cs(&s->lock);
     #ifdef DEBUG
@@ -671,7 +671,7 @@ int sem_up(semaphore_t *s) {
 }
 
 int sem_destroy(semaphore_t *s) {
-    if (s == NULL) {
+    if (s == NULL || s->valid == 0) {
         perror("WARNING [sem_destroy] Semáforo nulo: ");
         return -1;
     }
@@ -685,6 +685,7 @@ int sem_destroy(semaphore_t *s) {
     }
 
     s->counter = 0;
+    s->valid = 0;
     s->queue = NULL;
     s = NULL;
 
@@ -713,6 +714,8 @@ int mqueue_init(mqueue_t *queue, int max_msgs, int msg_size) {
     queue->max_msgs = max_msgs;
     queue->msg_size = msg_size;
     queue->buffer_top = 0;
+    queue->valid = 1;
+
 
     sem_init(&queue->s_buffer, 1);
     sem_init(&queue->s_vaga, max_msgs);
@@ -726,7 +729,7 @@ int mqueue_init(mqueue_t *queue, int max_msgs, int msg_size) {
 }
 
 int mqueue_send(mqueue_t* queue, void *msg) {
-    if (queue == NULL) {
+    if (queue == NULL || queue->valid == 0) {
         perror("WARNING [mqueue_send] Fila de mensagens nula: ");
         return -1;
     }
@@ -741,14 +744,13 @@ int mqueue_send(mqueue_t* queue, void *msg) {
     queue->buffer_top++;
 
     sem_up(&queue->s_buffer);
-
     sem_up(&queue->s_item);
 
     return 0;
 }
 
 int mqueue_recv(mqueue_t *queue, void *msg) {
-    if (queue == NULL) {
+    if (queue == NULL || queue->valid == 0) {
         perror("WARNING [mqueue_recv] Fila de mensagens nula: ");
         return -1;
     }
@@ -775,12 +777,12 @@ int mqueue_recv(mqueue_t *queue, void *msg) {
 
 
     memcpy(msg, (void *) queue->buffer, queue->msg_size);
-
+    memcpy((void *) queue->buffer, (void *) (queue->buffer + queue->msg_size), queue->msg_size * queue->buffer_top);
     /* move todas as mensagens uma posição para trás */
-    for (int i = 0; i < queue->buffer_top; i++) {
-        int offset = i * queue->msg_size;
-        memcpy((void *) queue->buffer + offset, (void *) queue->buffer + offset + queue->msg_size, queue->msg_size);
-    }
+    // for (int i = 0; i < queue->buffer_top; i++) {
+    //     int offset = i * queue->msg_size;
+    //     memcpy((void *) queue->buffer + offset, (void *) queue->buffer + offset + queue->msg_size, queue->msg_size);
+    // }
     queue->buffer_top--;
 
 
@@ -797,7 +799,7 @@ int mqueue_recv(mqueue_t *queue, void *msg) {
 }
 
 int mqueue_destroy(mqueue_t *queue) {
-    if (queue == NULL) {
+    if (queue == NULL || queue->valid == 0) {
         perror("WARNING [mqueue_destroy] Fila de mensagens nula: ");
         return -1;
     }
@@ -806,19 +808,18 @@ int mqueue_destroy(mqueue_t *queue) {
     sem_destroy(&queue->s_item);
     sem_destroy(&queue->s_buffer);
 
-    free(queue->buffer);
-
-    queue->buffer = NULL;
     queue->max_msgs = 0;
     queue->msg_size = 0;
     queue->buffer_top = 0;
-    queue = NULL;
+    queue->valid = 0;
+
+    free(queue->buffer);
 
     return 0;
 }
 
 int mqueue_msgs(mqueue_t *queue) {
-    if (queue == NULL) {
+    if (queue == NULL || queue->valid == 0) {
         perror("WARNING [mqueue_msgs] Fila de mensagens nula: ");
         return -1;
     }
