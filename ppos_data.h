@@ -20,7 +20,7 @@
 typedef struct task_t
 {
   struct task_t *prev, *next ;		// ponteiros para usar em filas
-  struct queue_t *tasks_waiting_for_conclusion; // ponteiro para a fila de tarefas esperando a conclusao da tarefa
+  struct queue_t **tasks_waiting_for_conclusion; // ponteiro para a fila de tarefas esperando a conclusao da tarefa
   int id ;				    // identificador da tarefa
   ucontext_t context ;// contexto armazenado da tarefa
   short status ;			// pronta, rodando, suspensa, ...
@@ -40,7 +40,7 @@ typedef struct task_t
 typedef struct
 {
   int counter; // contador do semáforo
-  queue_t *queue; // fila de tarefas bloqueadas no semáforo
+  task_t *queue; // fila de tarefas bloqueadas no semáforo
   int lock; // lock do semáforo
   short valid; // semáforo valido
 } semaphore_t ;
@@ -60,7 +60,6 @@ typedef struct
 // estrutura que define uma fila de mensagens
 typedef struct
 {
-  int max_msgs; // capacidade da fila
   int msg_size; // tamanho de cada mensagem
   semaphore_t s_buffer; // semáforo do buffer
   semaphore_t s_vaga; // semáforo da vaga
