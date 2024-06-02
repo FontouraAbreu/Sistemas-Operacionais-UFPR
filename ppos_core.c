@@ -37,7 +37,7 @@
 #define QUANTUM 20
 
 
-#define DEBUG
+// #define DEBUG
 #define STACKSIZE 64*1024	/* tamanho de pilha das threads */
 
 task_t *current_task, main_task, dispatcher_task; // tarefas atual, principal e dispatcher
@@ -210,10 +210,7 @@ void dispatcher_body(void *arg) {
 
             switch (next_task->status) {
                 case PRONTA: // 0
-                    queue_append(&ready_queue, (queue_t *) next_task);
-                    break;
-                // se a tarefa foi suspensa, a coloca na fila de suspensas
-                case SUSPENSA: // 2
+                    queue_append((queue_t **) &ready_queue, (queue_t *) next_task);
                     break;
                 // se a tarefa foi encerrada, a remove da fila de prontas
                 case TERMINADA: // 3
@@ -390,7 +387,6 @@ void task_exit(int exit_code) {
      current_task->processor_time,\
      current_task->activations);
 
-    current_task->status = TERMINADA;
     task_count--;
     /* se a tarefa que está encerrando é o dispatcher */
     switch (task_id()) {
@@ -398,7 +394,12 @@ void task_exit(int exit_code) {
             #ifdef DEBUG
                 printf("[task_exit] Tarefa Main encerrada\n");
             #endif
-            queue_remove((queue_t **) &ready_queue, (queue_t *) &main_task);
+            // check if the main task is in the ready queue
+            if (main_task.status == PRONTA) {
+                queue_remove((queue_t **) &ready_queue, (queue_t *) &main_task);
+            }
+            current_task->status = TERMINADA;
+            user_tasks--;
             task_switch(&dispatcher_task);
             break;
         case DISPATCHER_ID: // tarefa Dispatcher
@@ -417,11 +418,13 @@ void task_exit(int exit_code) {
             /* acorda as tarefas esperando a conclusão da tarefa */
             task_t *task_waiting = (task_t *) current_task->tasks_waiting_for_conclusion;
             #ifdef DEBUG
-                printf("[task_exit] Acordando %d tarefas esperando a conclusão da tarefa %d\n", queue_size(current_task->tasks_waiting_for_conclusion) , task_id());
+                printf("[task_exit] Acordando %d tarefas esperando a conclusão da tarefa %d\n", queue_size((queue_t *) current_task->tasks_waiting_for_conclusion), task_id());
             #endif
-            while (queue_size(current_task->tasks_waiting_for_conclusion) > 0) {
+            while (current_task->tasks_waiting_for_conclusion) {
                 task_awake(task_waiting, (task_t **) &current_task->tasks_waiting_for_conclusion);
             }
+            current_task->status = TERMINADA;
+            user_tasks--;
             task_switch(&dispatcher_task);
             break;
     }
@@ -535,8 +538,8 @@ void task_awake(task_t* task, task_t **queue) {
     }
 
     /* remove a tarefa da fila de suspensas e insere na fila de prontas */
-    task->status = PRONTA;
     queue_remove((queue_t **) queue, (queue_t *) task);
+    task->status = PRONTA;
     queue_append((queue_t **) &ready_queue, (queue_t *) task);
     #ifdef DEBUG
         printf("[task_awake] Tarefa %d acordada em %d\n", task->id, systime());
@@ -625,7 +628,6 @@ int sem_init(semaphore_t *s, int value) {
 int sem_down(semaphore_t *s) {
 
     if (s == NULL || s->valid == 0) {
-        perror("WARNING [sem_down] Semáforo nulo: ");
         return -1;
     }
 
@@ -641,7 +643,7 @@ int sem_down(semaphore_t *s) {
         #ifdef DEBUG
             printf("[sem_down] Tarefa %d bloqueada\n", task_id());
         #endif
-        task_suspend((task_t **) &s->queue);
+        task_suspend(&s->queue);
     }
 
     return 0;
@@ -649,7 +651,6 @@ int sem_down(semaphore_t *s) {
 
 int sem_up(semaphore_t *s) {
     if (s == NULL || s->valid == 0) {
-        perror("WARNING [sem_up] Semáforo nulo: ");
         return -1;
     }
 
@@ -660,7 +661,7 @@ int sem_up(semaphore_t *s) {
         printf("[sem_up] Incrementando semáforo para %d\n", s->counter);
     #endif
 
-    if (s->counter <= 0) {
+    if (queue_size((queue_t *) s->queue) > 0){
         #ifdef DEBUG
             printf("[sem_up] Tarefa %d acordada\n", ((task_t *) s->queue)->id);
         #endif
@@ -676,19 +677,14 @@ int sem_destroy(semaphore_t *s) {
         return -1;
     }
 
-    while (queue_size(s->queue) > 0) {
-
-        /* change task exit code */
-        task_t *task = (task_t *) s->queue;
-        task->exit_code = -1;
+    /* acorda todas as tarefas bloqueadas no semáforo */
+    while (s->queue) {
+        #ifdef DEBUG
+            printf("[sem_destroy] Acordando tarefa %d\n", ((task_t *) s->queue)->id);
+        #endif
         task_awake((task_t *) s->queue, (task_t **) &s->queue);
     }
-
-    s->counter = 0;
     s->valid = 0;
-    s->queue = NULL;
-    s = NULL;
-
     return 0;
 }
 
@@ -711,7 +707,6 @@ int mqueue_init(mqueue_t *queue, int max_msgs, int msg_size) {
         return -1;
     }
 
-    queue->max_msgs = max_msgs;
     queue->msg_size = msg_size;
     queue->buffer_top = 0;
     queue->valid = 1;
@@ -730,28 +725,30 @@ int mqueue_init(mqueue_t *queue, int max_msgs, int msg_size) {
 
 int mqueue_send(mqueue_t* queue, void *msg) {
     if (queue == NULL || queue->valid == 0) {
-        perror("WARNING [mqueue_send] Fila de mensagens nula: ");
         return -1;
     }
 
+    
+    if (sem_down(&queue->s_vaga))
+        return -1; // bloqueia a vaga
+    if (sem_down(&queue->s_buffer))
+        return -1; // bloqueia o buffer
 
-    sem_down(&queue->s_vaga);
-    sem_down(&queue->s_buffer);
 
+    int offset = queue->buffer_top * queue->msg_size; // calcula o offset da mensagem
+    memcpy((void *) (queue->buffer + offset), msg, queue->msg_size); // copia a mensagem para o buffer
+    queue->buffer_top++; // incrementa o topo do buffer
 
-    int offset = queue->buffer_top * queue->msg_size;
-    memcpy((void *) (queue->buffer + offset), msg, queue->msg_size);
-    queue->buffer_top++;
-
-    sem_up(&queue->s_buffer);
-    sem_up(&queue->s_item);
+    if (sem_up(&queue->s_buffer))
+        return -1; // desbloqueia o buffer
+    if (sem_up(&queue->s_item))
+        return -1; // desbloqueia o item
 
     return 0;
 }
 
 int mqueue_recv(mqueue_t *queue, void *msg) {
     if (queue == NULL || queue->valid == 0) {
-        perror("WARNING [mqueue_recv] Fila de mensagens nula: ");
         return -1;
     }
 
@@ -762,14 +759,16 @@ int mqueue_recv(mqueue_t *queue, void *msg) {
     #endif
 
 
-    sem_down(&queue->s_item);
+    if (sem_down(&queue->s_item))
+        return -1;
 
     #ifdef DEBUG
         printf("[mqueue_recv] Fila de mensagens bloqueada\n");
         printf("[mqueue_recv] Tenta bloquear a vaga\n");
     #endif
 
-    sem_down(&queue->s_buffer);
+    if (sem_down(&queue->s_buffer))
+        return -1;
 
     #ifdef DEBUG
         printf("[mqueue_recv] Vaga bloqueada\n");
@@ -778,11 +777,6 @@ int mqueue_recv(mqueue_t *queue, void *msg) {
 
     memcpy(msg, (void *) queue->buffer, queue->msg_size);
     memcpy((void *) queue->buffer, (void *) (queue->buffer + queue->msg_size), queue->msg_size * queue->buffer_top);
-    /* move todas as mensagens uma posição para trás */
-    // for (int i = 0; i < queue->buffer_top; i++) {
-    //     int offset = i * queue->msg_size;
-    //     memcpy((void *) queue->buffer + offset, (void *) queue->buffer + offset + queue->msg_size, queue->msg_size);
-    // }
     queue->buffer_top--;
 
 
@@ -791,8 +785,10 @@ int mqueue_recv(mqueue_t *queue, void *msg) {
         printf("[mqueue_recv] Desbloqueando fila de mensagens e vaga\n");
     #endif
 
-    sem_up(&queue->s_buffer);
-    sem_up(&queue->s_vaga);
+    if (sem_up(&queue->s_buffer))
+        return -1;
+    if (sem_up(&queue->s_vaga))
+        return -1;
 
 
     return 0;
@@ -804,13 +800,16 @@ int mqueue_destroy(mqueue_t *queue) {
         return -1;
     }
 
-    sem_destroy(&queue->s_vaga);
-    sem_destroy(&queue->s_item);
-    sem_destroy(&queue->s_buffer);
+    if (sem_destroy(&queue->s_vaga))
+        return -1;
+    if (sem_destroy(&queue->s_item))
+        return -1;
+    if (sem_destroy(&queue->s_buffer))
+        return -1;
 
-    queue->max_msgs = 0;
-    queue->msg_size = 0;
-    queue->buffer_top = 0;
+    // queue->max_msgs = 0;
+    // queue->msg_size = 0;
+    // queue->buffer_top = 0;
     queue->valid = 0;
 
     free(queue->buffer);
