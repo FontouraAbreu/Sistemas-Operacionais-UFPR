@@ -735,7 +735,7 @@ int mqueue_send(mqueue_t* queue, void *msg) {
         return -1; // bloqueia o buffer
 
 
-    int offset = queue->buffer_top * queue->msg_size; // calcula o offset da mensagem
+    int offset = queue->buffer_top * queue->msg_size; // calcula o offset da mensagem baseado no tamanho da mensagem
     memcpy((void *) (queue->buffer + offset), msg, queue->msg_size); // copia a mensagem para o buffer
     queue->buffer_top++; // incrementa o topo do buffer
 
@@ -807,12 +807,13 @@ int mqueue_destroy(mqueue_t *queue) {
     if (sem_destroy(&queue->s_buffer))
         return -1;
 
-    // queue->max_msgs = 0;
-    // queue->msg_size = 0;
-    // queue->buffer_top = 0;
+    queue->msg_size = 0;
+    queue->buffer_top = 0;
     queue->valid = 0;
 
     free(queue->buffer);
+    queue->buffer = NULL;
+    queue = NULL;
 
     return 0;
 }
