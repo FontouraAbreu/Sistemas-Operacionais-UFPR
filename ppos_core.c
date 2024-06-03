@@ -416,12 +416,11 @@ void task_exit(int exit_code) {
             #endif
 
             /* acorda as tarefas esperando a conclusão da tarefa */
-            task_t *task_waiting = (task_t *) current_task->tasks_waiting_for_conclusion;
             #ifdef DEBUG
                 printf("[task_exit] Acordando %d tarefas esperando a conclusão da tarefa %d\n", queue_size((queue_t *) current_task->tasks_waiting_for_conclusion), task_id());
             #endif
             while (current_task->tasks_waiting_for_conclusion) {
-                task_awake(task_waiting, (task_t **) &current_task->tasks_waiting_for_conclusion);
+                task_awake((task_t *) current_task->tasks_waiting_for_conclusion, (task_t **) &current_task->tasks_waiting_for_conclusion);
             }
             current_task->status = TERMINADA;
             user_tasks--;
